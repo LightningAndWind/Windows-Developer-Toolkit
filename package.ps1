@@ -1,4 +1,4 @@
-# 生成自包含发布包：devkit.exe + 便携版 Git (MinGit) + Win32-OpenSSH，解压即用。
+﻿# 生成自包含发布包：devkit.exe + 便携版 Git (MinGit) + Win32-OpenSSH，解压即用。
 # 用法：powershell -ExecutionPolicy Bypass -File package.ps1 [-SkipBuild] [-OutDir dist]
 # 说明：工具放在 exe 同级 tools\ 下，应用按「tools\ → 数据目录 tools\ → PATH」顺序解析。
 

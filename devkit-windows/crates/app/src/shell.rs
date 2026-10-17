@@ -1,11 +1,11 @@
-﻿//! 应用外壳：启动链路（引导 → 打库 → 恢复会话）、标签管理、工具粘合。
+//! 应用外壳：启动链路（引导 → 打库 → 恢复会话）、标签管理、工具粘合。
 //! 对应 macOS 端 AppState + TabManager + 各工具 Shell 装配。
 
 use crate::registry::DESCRIPTORS;
-use crate::{AppState, JsonUI, LauncherTool, MainWindow, TabItemData, Theme};
+use crate::{AppState, HttpUI, JsonUI, LauncherTool, MainWindow, TabItemData, Theme};
 use anyhow::Result;
 use devkit_core::db::Database;
-use devkit_core::session::{SessionSnapshot, SessionStore, TabSnapshot, WindowSessionSnapshot};
+use devkit_core::session::{SessionSnapshot, SessionStore, TabGroupSnapshot, TabSnapshot, WindowSessionSnapshot};
 use devkit_core::tool::ids;
 use devkit_tools::json::tool::JsonTool;
 use devkit_tools::json::SortMode;
@@ -218,7 +218,7 @@ fn rebuild_sidebar(ctx: &Rc<Ctx>, ui: &MainWindow) {
     for g in groups.iter() {
         let members: Vec<&TabEntry> = tabs
             .iter()
-            .filter(|t| t.group_id.map(|g2| g2.to_string() == g.id).unwrap_or(false))
+            .filter(|t| t.group_id == Some(g.id))
             .collect();
         let color_index: i32 = g.color_raw.parse().unwrap_or(0);
         rows.push(crate::SidebarRow {
@@ -226,7 +226,7 @@ fn rebuild_sidebar(ctx: &Rc<Ctx>, ui: &MainWindow) {
             name: g.name.clone().into(),
             color_index,
             collapsed: g.is_collapsed,
-            group_id: g.id.clone().into(),
+            group_id: g.id.to_string().into(),
             tab: TabItemData {
                 id: "".into(),
                 tool_id: "".into(),
@@ -245,7 +245,7 @@ fn rebuild_sidebar(ctx: &Rc<Ctx>, ui: &MainWindow) {
                         name: "".into(),
                         color_index: 0,
                         collapsed: false,
-                        group_id: g.id.clone().into(),
+                        group_id: g.id.to_string().into(),
                         tab: td.clone(),
                         group_count: 0,
                     });
@@ -409,6 +409,50 @@ pub fn run_app() -> Result<()> {
                     select_tab(&ui, &ctx, model.as_ref(), &t.id.to_string());
                 }
             }
+        });
+    }
+    {
+        // Ctrl+S：保存当前标签（对应 macOS ⌘S；仅 HTTP 工具支持保存）
+        let ctx = ctx.clone();
+        let ui = ui.as_weak();
+        state.on_save_current(move || {
+            let Some(ui) = ui.upgrade() else { return };
+            let active = ctx.active.borrow().clone();
+            let is_http = ctx
+                .tabs
+                .borrow()
+                .iter()
+                .any(|t| t.id.to_string() == active && t.tool_id == ids::HTTP);
+            if is_http {
+                ui.global::<HttpUI>().invoke_save();
+            }
+        });
+    }
+    {
+        // Ctrl+↓/↑：下一个/上一个标签（环绕，对应 macOS ⌃↓/⌃↑）
+        let ctx = ctx.clone();
+        let ui = ui.as_weak();
+        state.on_cycle_tab(move |delta| {
+            let Some(ui) = ui.upgrade() else { return };
+            let tabs = ctx.tabs.borrow().clone();
+            if tabs.is_empty() {
+                return;
+            }
+            let active = ctx.active.borrow().clone();
+            let next = match tabs.iter().position(|t| t.id.to_string() == active) {
+                Some(i) => (i as isize + delta as isize).rem_euclid(tabs.len() as isize) as usize,
+                // 无选中时对齐 macOS：↓ 回到第一个，↑ 到最后一个
+                None => {
+                    if delta >= 0 {
+                        0
+                    } else {
+                        tabs.len() - 1
+                    }
+                }
+            };
+            let id = tabs[next].id.to_string();
+            let model = tabs_model_handle();
+            select_tab(&ui, &ctx, model.as_ref(), &id);
         });
     }
     {

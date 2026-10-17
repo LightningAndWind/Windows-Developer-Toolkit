@@ -91,14 +91,14 @@ component TabRow inherits Rectangle {
 }
 
 component GroupHeader inherits Rectangle {
-    in property <SidebarRow> row;
+    in property <SidebarRow> data;
 
     height: 28px;
     border-radius: 6px;
     background: ta.has-hover ? Theme.hover : transparent;
 
     ta := TouchArea {
-        clicked => { AppState.toggle-group(row.group-id); }
+        clicked => { AppState.toggle-group(data.group-id); }
     }
 
     HorizontalLayout {
@@ -108,7 +108,7 @@ component GroupHeader inherits Rectangle {
 
         Text {
             width: 12px;
-            text: row.collapsed ? "▸" : "▾";
+            text: data.collapsed ? "▸" : "▾";
             color: Theme.text-secondary;
             font-size: 10px;
             vertical-alignment: center;
@@ -119,11 +119,11 @@ component GroupHeader inherits Rectangle {
             height: 8px;
             y: 10px;
             border-radius: 4px;
-            background: Theme.group-color(row.color-index);
+            background: Theme.group-color(data.color-index);
         }
 
         Text {
-            text: row.name;
+            text: data.name;
             color: Theme.text;
             font-size: 12px;
             font-weight: 600;
@@ -133,7 +133,7 @@ component GroupHeader inherits Rectangle {
         }
 
         Text {
-            text: "\{row.group-count}";
+            text: "\{data.group-count}";
             color: Theme.text-secondary;
             font-size: 10px;
             vertical-alignment: center;
@@ -148,7 +148,7 @@ component GroupHeader inherits Rectangle {
             background: del-ta.has-hover ? Theme.danger : transparent;
 
             del-ta := TouchArea {
-                clicked => { AppState.delete-group(row.group-id); }
+                clicked => { AppState.delete-group(data.group-id); }
             }
 
             Text {
@@ -201,7 +201,7 @@ export component TabSidebar inherits Rectangle {
                 for row in AppState.sidebar-rows: Rectangle {
                     width: parent.width;
 
-                    if row.kind == 0: GroupHeader { row: row; }
+                    if row.kind == 0: GroupHeader { data: row; }
                     if row.kind == 1: TabRow {
                         data: row.tab;
                         indent: row.group-id == "" ? 0 : 1;

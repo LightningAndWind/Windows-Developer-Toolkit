@@ -25,7 +25,7 @@ export global Theme {
     out property <length> radius: 8px;
 
     // 标签分组预设色（对应 macOS 端 TabGroup.GroupColor）
-    public function group-color(i: int) -> color {
+    public pure function group-color(i: int) -> color {
         if (i == 0) { return #8e8e93; }
         if (i == 1) { return #0a84ff; }
         if (i == 2) { return #bf5af2; }

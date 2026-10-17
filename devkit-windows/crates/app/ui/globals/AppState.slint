@@ -93,6 +93,8 @@ export global AppState {
     // M7
     callback select-tab-index(int);
     callback close-current-tab();
+    callback save-current();      // Ctrl+S：保存当前标签（目前仅 HTTP 工具支持）
+    callback cycle-tab(int);      // Ctrl+↓/↑：1=下一个，-1=上一个（环绕）
     callback rename-requested(string);
     callback rename-confirm();
     callback rename-cancel();

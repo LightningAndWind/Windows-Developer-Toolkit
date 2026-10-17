@@ -33,12 +33,13 @@ export component MainWindow inherits Window {
     background: Theme.bg;
     default-font-family: "Segoe UI";
 
-    // 全局快捷键（对应 macOS 端 DevkitCommands：⌘T/⌘1-9/⌘W/⌘E/⌘,）
+    // 全局快捷键（对应 macOS 端 DevkitCommands：⌘T/⌘1-9/⌘W/⌘S/⌘E/⌃↓⌃↑/⌘,）
     hotkeys := FocusScope {
         key-pressed(e) => {
             if (e.modifiers.control && !e.modifiers.alt && !e.modifiers.shift) {
                 if (e.text == "t") { AppState.new-tab(""); return accept; }
                 if (e.text == "w") { AppState.close-current-tab(); return accept; }
+                if (e.text == "s") { AppState.save-current(); return accept; }
                 if (e.text == ",") { AppState.settings-opened(); return accept; }
                 if (e.text == "e") { AppState.rename-requested(AppState.active-id); return accept; }
                 if (e.text == "1") { AppState.select-tab-index(0); return accept; }
@@ -51,6 +52,9 @@ export component MainWindow inherits Window {
                 if (e.text == "8") { AppState.select-tab-index(7); return accept; }
                 if (e.text == "9") { AppState.select-tab-index(8); return accept; }
                 if (e.text == "0") { AppState.select-tab-index(9); return accept; }
+                // Ctrl+↓/Ctrl+↑：下一个/上一个标签（环绕）
+                if (e.text == "\u{f701}") { AppState.cycle-tab(1); return accept; }
+                if (e.text == "\u{f700}") { AppState.cycle-tab(-1); return accept; }
             }
             reject
         }

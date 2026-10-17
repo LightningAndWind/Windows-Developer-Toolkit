@@ -1,0 +1,145 @@
+﻿// 新标签页（Launcher）：工具卡片按分类展示 + 搜索过滤。
+import { LineEdit } from "std-widgets.slint";
+import { Theme } from "../globals/Theme.slint";
+import { AppState, LauncherTool } from "../globals/AppState.slint";
+
+component ToolCard inherits Rectangle {
+    in property <LauncherTool> data;
+    callback open;
+
+    height: 84px;
+    width: 236px;
+    border-radius: Theme.radius;
+    background: ta.has-hover ? Theme.hover : Theme.card-bg;
+    border-width: 1px;
+    border-color: Theme.divider;
+
+    ta := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.open(); }
+    }
+
+    HorizontalLayout {
+        padding: 14px;
+        spacing: 12px;
+        alignment: start;
+
+        Rectangle {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            background: Theme.accent-soft;
+
+            Text {
+                text: data.icon;
+                font-size: 20px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        VerticalLayout {
+            spacing: 3px;
+            alignment: center;
+
+            Text {
+                text: data.title;
+                font-weight: 600;
+                color: Theme.text;
+            }
+
+            Text {
+                text: data.subtitle;
+                font-size: 12px;
+                color: Theme.text-secondary;
+                overflow: elide;
+                wrap: no-wrap;
+            }
+        }
+    }
+}
+
+component SectionTitle inherits Text {
+    color: Theme.text-secondary;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+export component Launcher inherits Rectangle {
+    background: Theme.bg;
+    callback open-tool(string);
+
+    VerticalLayout {
+        padding: 36px;
+        padding-top: 44px;
+        spacing: 18px;
+
+        Text {
+            text: "devkit";
+            font-size: 30px;
+            font-weight: 700;
+            color: Theme.text;
+        }
+
+        Text {
+            text: "本地化开发者工具集 · 精简 · 快速 · 低内存";
+            color: Theme.text-secondary;
+            font-size: 13px;
+        }
+
+        LineEdit {
+            placeholder-text: "搜索工具";
+            edited(t) => { root.query-changed(t); }
+        }
+
+        Flickable {
+            VerticalLayout {
+                spacing: 12px;
+
+                if AppState.tools-network.length > 0: SectionTitle { text: "网络"; }
+                HorizontalLayout {
+                    spacing: 12px;
+                    alignment: start;
+                    for t in AppState.tools-network: ToolCard {
+                        data: t;
+                        open => { root.open-tool(t.id); }
+                    }
+                }
+
+                if AppState.tools-terminal.length > 0: SectionTitle { text: "终端"; }
+                HorizontalLayout {
+                    spacing: 12px;
+                    alignment: start;
+                    for t in AppState.tools-terminal: ToolCard {
+                        data: t;
+                        open => { root.open-tool(t.id); }
+                    }
+                }
+
+                if AppState.tools-data.length > 0: SectionTitle { text: "数据"; }
+                HorizontalLayout {
+                    spacing: 12px;
+                    alignment: start;
+                    for t in AppState.tools-data: ToolCard {
+                        data: t;
+                        open => { root.open-tool(t.id); }
+                    }
+                }
+
+                if AppState.tools-utility.length > 0: SectionTitle { text: "实用工具"; }
+                HorizontalLayout {
+                    spacing: 12px;
+                    alignment: start;
+                    for t in AppState.tools-utility: ToolCard {
+                        data: t;
+                        open => { root.open-tool(t.id); }
+                    }
+                }
+
+                Rectangle { height: 12px; }
+            }
+        }
+    }
+
+    callback query-changed(string);
+}

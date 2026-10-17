@@ -1,0 +1,254 @@
+﻿// JSON 工具视图：工具栏（视图切换 / 格式化 / 压缩 / 排序 / 缩进 / 复制）
+// + 文本编辑器或树形列表 + 底部状态栏（统计 / 错误）。
+import { ListView, TextEdit } from "std-widgets.slint";
+import { Theme } from "../globals/Theme.slint";
+import { JsonUI, JsonTreeNode } from "../globals/JsonUI.slint";
+
+component ToolButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> on: false;
+    callback clicked;
+
+    height: 28px;
+    min-width: 40px;
+    padding-left: 10px;
+    padding-right: 10px;
+    border-radius: 6px;
+    background: ta.has-hover ? Theme.hover : (on ? Theme.accent-soft : transparent);
+    border-width: 1px;
+    border-color: on ? Theme.accent : Theme.divider;
+
+    ta := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.clicked(); }
+    }
+
+    Text {
+        text: root.label;
+        font-size: 12px;
+        color: root.on ? Theme.accent : Theme.text;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component SegItem inherits Rectangle {
+    in property <string> label;
+    in property <bool> on;
+    callback clicked;
+
+    width: 52px;
+    border-radius: 6px;
+    background: on ? Theme.accent : (ta.has-hover ? Theme.hover : transparent);
+
+    ta := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.clicked(); }
+    }
+
+    Text {
+        text: root.label;
+        font-size: 12px;
+        color: on ? #ffffff : Theme.text;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export component JsonToolView inherits Rectangle {
+    function kind-color(t: string) -> color {
+        if (t == "对象" || t == "数组") { return Theme.accent; }
+        if (t == "字符串") { return Theme.ok; }
+        if (t == "数字") { return #3b82f6; }
+        if (t == "布尔") { return Theme.warn; }
+        return Theme.text-secondary;
+    }
+
+    background: Theme.content-bg;
+
+    VerticalLayout {
+        // 工具栏
+        Rectangle {
+            height: 44px;
+            HorizontalLayout {
+                padding: 8px;
+                spacing: 8px;
+                alignment: start;
+
+                Rectangle {
+                    width: 108px;
+                    height: 28px;
+                    border-radius: 6px;
+                    background: Theme.active;
+
+                    HorizontalLayout {
+                        spacing: 0;
+
+                        SegItem {
+                            label: "文本";
+                            on: JsonUI.view-mode == 0;
+                            clicked => { JsonUI.view-changed(0); }
+                        }
+                        SegItem {
+                            label: "树";
+                            on: JsonUI.view-mode == 1;
+                            clicked => { JsonUI.view-changed(1); }
+                        }
+                    }
+                }
+
+                ToolButton {
+                    label: "格式化";
+                    clicked => { JsonUI.format(); }
+                }
+                ToolButton {
+                    label: "压缩";
+                    clicked => { JsonUI.compress(); }
+                }
+                ToolButton {
+                    label: "升序";
+                    on: JsonUI.sort-desc == false;
+                    clicked => { JsonUI.sort-asc(); }
+                }
+                ToolButton {
+                    label: "降序";
+                    on: JsonUI.sort-desc == true;
+                    clicked => { JsonUI.sort-desc-btn(); }
+                }
+                ToolButton {
+                    label: JsonUI.sort-recursive ? "递归" : "顶层";
+                    on: JsonUI.sort-recursive;
+                    clicked => { JsonUI.sort-recursive = !JsonUI.sort-recursive; }
+                }
+                ToolButton {
+                    label: JsonUI.indent-mode == 0 ? "缩进 2" : (JsonUI.indent-mode == 1 ? "缩进 4" : "缩进 Tab");
+                    clicked => { JsonUI.indent-cycled(); }
+                }
+                ToolButton {
+                    label: "复制";
+                    clicked => { JsonUI.copy-all(); }
+                }
+            }
+        }
+
+        // 主体
+        if JsonUI.view-mode == 0: Rectangle {
+            vertical-stretch: 1;
+
+            TextEdit {
+                x: 4px;
+                width: parent.width - 8px;
+                height: parent.height;
+                text <=> JsonUI.text;
+                font-family: "Consolas";
+                font-size: 13px;
+                wrap: no-wrap;
+                edited(t) => { JsonUI.text-edited(t); }
+            }
+        }
+
+        if JsonUI.view-mode == 1: Rectangle {
+            vertical-stretch: 1;
+
+            ListView {
+                x: 4px;
+                width: parent.width - 8px;
+
+                for n[index] in JsonUI.tree: Rectangle {
+                    height: 26px;
+                    background: row-ta.has-hover ? Theme.hover : transparent;
+
+                    row-ta := TouchArea {
+                        clicked => {
+                            if (n.has-children) { JsonUI.tree-toggled(index); }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: 8px + n.depth * 18px;
+                        spacing: 6px;
+
+                        Text {
+                            width: 14px;
+                            text: n.expanded ? "▾" : "▸";
+                            color: Theme.text-secondary;
+                            visible: n.has-children;
+                            vertical-alignment: center;
+                        }
+
+                        Text {
+                            text: n.key == "" ? "(根)" : n.key;
+                            color: Theme.text;
+                            font-family: "Consolas";
+                            font-size: 12px;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            horizontal-stretch: 0;
+                        }
+
+                        Rectangle {
+                            width: 36px;
+                            height: 17px;
+                            border-radius: 4px;
+                            background: kind-color(n.kind) == Theme.accent ? Theme.accent-soft : transparent;
+
+                            Text {
+                                text: n.kind;
+                                font-size: 10px;
+                                color: kind-color(n.kind);
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        Text {
+                            text: n.preview;
+                            color: Theme.text-secondary;
+                            font-family: "Consolas";
+                            font-size: 12px;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+
+                        if n.has-children: Text {
+                            text: "\{n.child-count} 项";
+                            color: Theme.text-secondary;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 状态栏
+        Rectangle {
+            height: 28px;
+            background: Theme.sidebar-bg;
+
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 12px;
+
+                Text {
+                    text: JsonUI.valid ? JsonUI.stats-line
+                        : "✕ 第 \{JsonUI.error-line} 行 第 \{JsonUI.error-col} 列：\{JsonUI.error-msg}";
+                    color: JsonUI.valid ? Theme.text-secondary : Theme.danger;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+
+                Text {
+                    text: JsonUI.status;
+                    color: Theme.ok;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}

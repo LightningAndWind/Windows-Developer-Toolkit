@@ -1,0 +1,36 @@
+// JSON 工具全局状态（当前激活 JSON 标签的镜像；真源在 Rust 侧每标签运行时）。
+export struct JsonTreeNode {
+    key: string,
+    kind: string,
+    preview: string,
+    depth: int,
+    expanded: bool,
+    has-children: bool,
+    child-count: int,
+}
+
+export global JsonUI {
+    in-out property <string> text;
+    in-out property <int> view-mode: 0;      // 0=文本 1=树
+    in-out property <int> indent-mode: 0;    // 0=2空格 1=4空格 2=Tab
+    in-out property <bool> valid;
+    in-out property <int> error-line: -1;
+    in-out property <int> error-col: -1;
+    in-out property <string> error-msg;
+    in-out property <string> stats-line;
+    in-out property <string> status;         // 瞬时反馈（已格式化 / 已复制 …）
+    in-out property <[JsonTreeNode]> tree;
+    in-out property <bool> sort-desc: false;
+    in-out property <bool> sort-recursive: true;
+
+    callback text-edited(string);
+    callback view-changed(int);
+    callback format();
+    callback compress();
+    callback sort-asc();
+    callback sort-desc-btn();
+    callback indent-cycled();
+    callback copy-all();
+    callback tree-toggled(int);
+    callback tree-copied(int);
+}

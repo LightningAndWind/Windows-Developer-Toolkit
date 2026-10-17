@@ -1,0 +1,99 @@
+// HTTP 工具全局状态（当前激活 HTTP 标签的镜像；真源在 Rust 侧每标签运行时）。
+export struct KvRow {
+    key: string,
+    value: string,
+    enabled: bool,
+}
+
+export struct HttpHistoryRow {
+    id: string,
+    method: string,
+    url: string,
+    time-text: string,
+    status-code: int,   // -1 = 无响应（取消/失败）
+    duration-text: string,
+}
+
+export struct HttpTreeNode {
+    id: string,
+    name: string,
+    is-folder: bool,
+    depth: int,
+    expanded: bool,
+    has-children: bool,
+    bound: bool,        // 当前编辑器是否绑定此请求
+}
+
+export global HttpUI {
+    // 请求
+    in-out property <string> method: "GET";
+    in-out property <string> url;
+    in-out property <[KvRow]> params;
+    in-out property <[KvRow]> headers;
+    in-out property <int> body-kind: 0;       // 0无 1json 2form 3raw
+    in-out property <string> body-text;
+    in-out property <[KvRow]> form;
+    in-out property <int> auth-kind: 0;       // 0无 1bearer 2basic
+    in-out property <string> auth-token;
+    in-out property <string> auth-user;
+    in-out property <string> auth-pass;
+    in-out property <int> timeout-secs: 30;
+    // 分区
+    in-out property <int> editor-tab: 0;      // 0参数 1头 2体 3认证 4历史
+    // 响应
+    in-out property <bool> sending;
+    in-out property <int> resp-tab: 0;        // 0美化 1原始 2头 3预览
+    in-out property <string> resp-body;
+    in-out property <string> resp-headers-text;
+    in-out property <string> resp-status-line;
+    in-out property <bool> resp-ok;
+    in-out property <bool> resp-truncated;
+    in-out property <string> resp-error;
+    in-out property <bool> resp-image-ok;
+    in-out property <image> resp-image;
+    // 集合 / 保存
+    in-out property <string> saved-name;
+    in-out property <bool> dirty;
+    in-out property <string> status;
+    in-out property <bool> save-dialog-visible;
+    in-out property <string> save-name-input;
+    in-out property <[string]> save-folder-options;
+    in-out property <int> save-combo-index: 0; // 0 = 根目录
+    in-out property <string> save-new-folder;
+    // 历史 / 树
+    in-out property <[HttpHistoryRow]> history;
+    in-out property <[HttpTreeNode]> tree;
+
+    callback send();
+    callback stop();
+    callback editor-tab-changed(int);
+    callback resp-tab-changed(int);
+    callback body-kind-changed(int);
+    callback kv-edited(int, int, int, string); // table(0参数1头2form), index, field(0key 1value), value
+    callback kv-toggled(int, int);
+    callback kv-added(int);
+    callback kv-deleted(int, int);
+    callback url-parsed();
+    callback body-formatted();
+    callback auth-kind-changed(int);
+    callback timeout-cycled();
+    callback copy-curl();
+    callback clear-request();
+    callback save();
+    callback save-as-dialog();
+    callback save-dialog-cancel();
+    callback save-dialog-confirm();
+    callback history-reload();
+    callback history-searched(string);
+    callback history-selected(int);
+    callback history-deleted(int);
+    callback history-resent(int);
+    callback tree-toggled(int);
+    callback tree-selected(int);
+    callback tree-deleted(int);
+    callback tree-renamed(int, string);
+    callback tree-moved(int, int);
+    callback new-folder(int);
+    callback copy-body();
+    callback load-history(int);
+}

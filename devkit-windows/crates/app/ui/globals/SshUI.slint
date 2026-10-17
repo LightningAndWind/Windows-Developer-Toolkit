@@ -1,0 +1,50 @@
+// SSH 工具全局状态（当前激活 SSH 标签镜像；终端行模型由 Rust 侧换挂）。
+export struct SshTreeNode {
+    id: string,
+    name: string,
+    summary: string,
+    is-folder: bool,
+    is-local: bool,
+    depth: int,
+    expanded: bool,
+    has-children: bool,
+}
+
+export global SshUI {
+    // 连接横幅
+    in-out property <int> state-kind: 0;   // 0未连 1连接中 2已连 3失败 4已断开
+    in-out property <string> state-text;
+    in-out property <string> connect-summary;
+    in-out property <bool> connected;
+    // 未连接时的选择面板
+    in-out property <[SshTreeNode]> profiles;
+    // 记录编辑器
+    in-out property <bool> editor-visible;
+    in-out property <bool> editing-local: false;
+    in-out property <string> ed-name;
+    in-out property <string> ed-host;
+    in-out property <string> ed-port: "22";
+    in-out property <string> ed-user;
+    in-out property <int> ed-auth: 0;      // 0密码 1私钥
+    in-out property <string> ed-password;
+    in-out property <string> ed-key-file;
+    in-out property <string> ed-passphrase;
+    in-out property <string> ed-working-dir;
+    in-out property <string> editor-error;
+
+    callback tree-toggled(int);
+    callback tree-selected(int);
+    callback tree-deleted(int);
+    callback tree-renamed(int, string);
+    callback connect-local();
+    callback new-remote-record();
+    callback new-local-record();
+    callback edit-record(int);
+    callback save-record();
+    callback cancel-editor();
+    callback pick-key-file();
+    callback disconnect();
+    callback reconnect();
+    callback editor-auth-cycled();
+    callback copy-summary();
+}

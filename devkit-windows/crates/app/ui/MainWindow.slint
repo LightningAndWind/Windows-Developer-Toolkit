@@ -1,0 +1,275 @@
+// devkit 主窗口：引导页 → 侧栏 + 可拖拽分割线 + 内容区（常驻工具视图 / Launcher）。
+import { Theme } from "globals/Theme.slint";
+import { AppState, TabItemData, LauncherTool } from "globals/AppState.slint";
+import { SshUI, SshTreeNode } from "globals/SshUI.slint";
+import { SftpUI, SftpRow } from "globals/SftpUI.slint";
+import { GitUI, GitChangeRow, GitCommitRow, GitBranchRow, GitStashRow, GitDiffRow, GitRepoNode, GitKeyRow } from "globals/GitUI.slint";
+import { TabSidebar } from "widgets/TabSidebar.slint";
+import { Launcher } from "widgets/Launcher.slint";
+import { OnboardingView } from "widgets/OnboardingView.slint";
+import { JsonToolView } from "widgets/JsonToolView.slint";
+import { HttpToolView } from "widgets/HttpToolView.slint";
+import { SshToolView } from "widgets/SshToolView.slint";
+import { SftpToolView } from "widgets/SftpToolView.slint";
+import { GitToolView } from "widgets/GitToolView.slint";
+import { SettingsView } from "widgets/SettingsView.slint";
+import { TermLine, TermSpan, TermHostUI } from "widgets/TerminalView.slint";
+import { LineEdit } from "std-widgets.slint";
+import { ListView } from "std-widgets.slint";
+
+export { AppState, Theme }
+export { TabItemData, LauncherTool, SettingsRow, TabGroupData, SidebarRow } from "globals/AppState.slint";
+export { JsonUI, JsonTreeNode } from "globals/JsonUI.slint";
+export { HttpUI, KvRow, HttpHistoryRow, HttpTreeNode } from "globals/HttpUI.slint";
+export { SshUI, SshTreeNode } from "globals/SshUI.slint";
+export { SftpUI, SftpRow } from "globals/SftpUI.slint";
+export { GitUI, GitChangeRow, GitCommitRow, GitBranchRow, GitStashRow, GitDiffRow, GitRepoNode, GitKeyRow } from "globals/GitUI.slint";
+export { TermLine, TermSpan, TermHostUI } from "widgets/TerminalView.slint";
+
+export component MainWindow inherits Window {
+    title: "devkit";
+    width: 1200px;
+    height: 800px;
+    background: Theme.bg;
+    default-font-family: "Segoe UI";
+
+    // 全局快捷键（对应 macOS 端 DevkitCommands：⌘T/⌘1-9/⌘W/⌘E/⌘,）
+    hotkeys := FocusScope {
+        key-pressed(e) => {
+            if (e.modifiers.control && !e.modifiers.alt && !e.modifiers.shift) {
+                if (e.text == "t") { AppState.new-tab(""); return accept; }
+                if (e.text == "w") { AppState.close-current-tab(); return accept; }
+                if (e.text == ",") { AppState.settings-opened(); return accept; }
+                if (e.text == "e") { AppState.rename-requested(AppState.active-id); return accept; }
+                if (e.text == "1") { AppState.select-tab-index(0); return accept; }
+                if (e.text == "2") { AppState.select-tab-index(1); return accept; }
+                if (e.text == "3") { AppState.select-tab-index(2); return accept; }
+                if (e.text == "4") { AppState.select-tab-index(3); return accept; }
+                if (e.text == "5") { AppState.select-tab-index(4); return accept; }
+                if (e.text == "6") { AppState.select-tab-index(5); return accept; }
+                if (e.text == "7") { AppState.select-tab-index(6); return accept; }
+                if (e.text == "8") { AppState.select-tab-index(7); return accept; }
+                if (e.text == "9") { AppState.select-tab-index(8); return accept; }
+                if (e.text == "0") { AppState.select-tab-index(9); return accept; }
+            }
+            reject
+        }
+    }
+
+    init => {
+        hotkeys.focus();
+    }
+
+    if AppState.needs-onboarding: OnboardingView {}
+
+    if !AppState.needs-onboarding: HorizontalLayout {
+        TabSidebar {
+            horizontal-stretch: 0;
+            width: AppState.sidebar-width;
+        }
+
+        // 可拖拽分割线（对应 SidebarResizeDivider）
+        div := Rectangle {
+            horizontal-stretch: 0;
+            width: 5px;
+            background: transparent;
+
+            property <length> last-x;
+
+            TouchArea {
+                mouse-cursor: MouseCursor.col-resize;
+                pointer-event(e) => {
+                    if (e.kind == PointerEventKind.down) {
+                        div.last-x = self.mouse-x;
+                    }
+                    if (e.kind == PointerEventKind.up) {
+                        AppState.sidebar-width-changed();
+                    }
+                }
+                moved => {
+                    if (self.pressed) {
+                        AppState.sidebar-width = Math.clamp(
+                            AppState.sidebar-width + self.mouse-x - div.last-x,
+                            Theme.sidebar-min,
+                            Theme.sidebar-max);
+                        div.last-x = self.mouse-x;
+                    }
+                }
+            }
+        }
+
+        // 内容区：工具视图常驻，切换仅改 visible（对应 macOS 端 ResidentToolTab）
+        Rectangle {
+            horizontal-stretch: 1;
+
+            Launcher {
+                visible: AppState.launcher-visible;
+                open-tool(id) => { AppState.new-tab(id); }
+                query-changed(q) => { AppState.launcher-search(q); }
+            }
+
+            JsonToolView {
+                visible: !AppState.launcher-visible && AppState.active-tool-id == "json";
+            }
+
+            HttpToolView {
+                visible: !AppState.launcher-visible && AppState.active-tool-id == "http";
+            }
+
+            sshview := SshToolView {
+                visible: !AppState.launcher-visible && AppState.active-tool-id == "ssh";
+            }
+
+            sftpview := SftpToolView {
+                visible: !AppState.launcher-visible && AppState.active-tool-id == "sftp";
+            }
+
+            gitview := GitToolView {
+                visible: !AppState.launcher-visible && AppState.active-tool-id == "git";
+            }
+
+            // 其余工具视图随里程碑接入
+            Rectangle {
+                visible: !AppState.launcher-visible
+                    && AppState.active-tool-id != "json"
+                    && AppState.active-tool-id != "http"
+                    && AppState.active-tool-id != "ssh"
+                    && AppState.active-tool-id != "sftp"
+                    && AppState.active-tool-id != "git"
+                    && AppState.active-tool-id != "";
+                background: Theme.content-bg;
+
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: "该工具视图开发中（里程碑推进接入）";
+                        color: Theme.text-secondary;
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
+    // ===== 设置面板（M7）=====
+    if AppState.settings-visible: SettingsView {}
+
+    // ===== 分组选择浮层（M7：移动标签到分组）=====
+    if AppState.group-picker-visible: Rectangle {
+        background: rgba(0, 0, 0, 0.35);
+        TouchArea { clicked => { AppState.close-group-picker(); } }
+
+        Rectangle {
+            width: 320px;
+            height: 320px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: 12px;
+            background: Theme.content-bg;
+            border-width: 1px;
+            border-color: Theme.divider;
+
+            VerticalLayout {
+                padding: 14px;
+                spacing: 8px;
+
+                Text { text: "移动标签到分组"; font-size: 14px; font-weight: 600; color: Theme.text; }
+
+                ListView {
+                    for g in AppState.groups: Rectangle {
+                        height: 34px;
+                        border-radius: 6px;
+                        background: g-ta.has-hover ? Theme.hover : transparent;
+                        g-ta := TouchArea { clicked => { AppState.move-tab-to-group(g.id); } }
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            spacing: 8px;
+                            Rectangle {
+                                width: 8px;
+                                height: 8px;
+                                y: 13px;
+                                border-radius: 4px;
+                                background: g.color-index == 1 ? #0a84ff : (g.color-index == 2 ? #bf5af2 : (g.color-index == 3 ? #ff375f : (g.color-index == 5 ? #ff9f0a : #8e8e93)));
+                            }
+                            Text { text: g.name; color: Theme.text; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: 34px;
+                    border-radius: 6px;
+                    background: ug-ta.has-hover ? Theme.hover : Theme.active;
+                    ug-ta := TouchArea { clicked => { AppState.move-tab-to-group(""); } }
+                    Text { text: "未分组"; color: Theme.text; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                }
+
+                Rectangle {
+                    height: 34px;
+                    border-radius: 6px;
+                    background: ng-ta.has-hover ? Theme.hover : transparent;
+                    border-width: 1px;
+                    border-color: Theme.divider;
+                    ng-ta := TouchArea { clicked => { AppState.new-group-for-picker(); } }
+                    Text { text: "＋ 新建分组并移入"; color: Theme.accent; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                }
+            }
+        }
+    }
+
+    // ===== 标签重命名对话框（M7）=====
+    if AppState.rename-dialog-visible: Rectangle {
+        background: rgba(0, 0, 0, 0.35);
+
+        Rectangle {
+            width: 380px;
+            height: 150px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: 12px;
+            background: Theme.content-bg;
+            border-width: 1px;
+            border-color: Theme.divider;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 10px;
+
+                Text { text: "重命名标签"; font-size: 15px; font-weight: 600; color: Theme.text; }
+
+                LineEdit {
+                    text <=> AppState.rename-input;
+                    font-size: 13px;
+                    accepted => { AppState.rename-confirm(); }
+                }
+
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 10px;
+
+                    Rectangle {
+                        height: 28px;
+                        min-width: 60px;
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        border-radius: 6px;
+                        background: cancel-ta.has-hover ? Theme.hover : Theme.active;
+                        cancel-ta := TouchArea { clicked => { AppState.rename-cancel(); } }
+                        Text { text: "取消"; font-size: 12px; color: Theme.text; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+
+                    Rectangle {
+                        height: 28px;
+                        min-width: 60px;
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        border-radius: 6px;
+                        background: ok-ta.has-hover ? #0a94ff : Theme.accent;
+                        ok-ta := TouchArea { clicked => { AppState.rename-confirm(); } }
+                        Text { text: "确定"; font-size: 12px; color: #ffffff; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+            }
+        }
+    }
+}

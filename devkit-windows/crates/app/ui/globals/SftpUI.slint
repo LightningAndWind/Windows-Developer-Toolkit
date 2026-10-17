@@ -1,0 +1,47 @@
+// SFTP 工具全局状态（左右双面板）。
+import { SshTreeNode } from "SshUI.slint";
+
+export struct SftpRow {
+    name: string,
+    is-dir: bool,
+    size-text: string,
+    selected: bool,
+}
+
+export global SftpUI {
+    in-out property <string> left-label;
+    in-out property <string> left-path;
+    in-out property <[SftpRow]> left-rows;
+    in-out property <bool> left-connected;
+
+    in-out property <string> right-label;
+    in-out property <string> right-path;
+    in-out property <[SftpRow]> right-rows;
+    in-out property <bool> right-connected;
+
+    // 连接选择浮层（0 关闭 1 左 2 右）
+    in-out property <int> picker-side: 0;
+    in-out property <[SshTreeNode]> picker-profiles;
+
+    // 传输 HUD
+    in-out property <bool> hud-visible;
+    in-out property <string> hud-line1;
+    in-out property <string> hud-line2;
+    in-out property <float> hud-progress: 0.0;
+    in-out property <string> hud-error;
+
+    callback refresh(int);
+    callback go-up(int);
+    callback path-edited(int, string);
+    callback row-activated(int, int);
+    callback row-toggled(int, int);
+    callback connect-local(int);
+    callback connect-profile(int, string);
+    callback disconnect(int);
+    callback open-picker(int);
+    callback close-picker();
+    callback transfer(int /*from side*/);
+    callback cancel-transfer();
+    callback new-folder(int);
+    callback delete-selected(int);
+}

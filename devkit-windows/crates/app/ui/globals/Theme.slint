@@ -1,0 +1,39 @@
+// 设计令牌：对应 macOS 端 Theme.swift。深浅双态 + 度量。
+export global Theme {
+    in-out property <bool> dark: false;
+
+    // 调色板（深色压暗、浅色偏净）
+    out property <color> bg: dark ? #1f1f22 : #f2f2f6;
+    out property <color> sidebar-bg: dark ? #232327 : #e8e8ee;
+    out property <color> content-bg: dark ? #1c1c1f : #ffffff;
+    out property <color> card-bg: dark ? #2a2a30 : #ffffff;
+    out property <color> text: dark ? #e9e9ee : #1c1c20;
+    out property <color> text-secondary: dark ? #98989f : #6c6c76;
+    out property <color> accent: #0a84ff;
+    out property <color> accent-soft: dark ? rgba(10, 132, 255, 0.16) : rgba(10, 132, 255, 0.10);
+    out property <color> divider: dark ? rgba(255, 255, 255, 0.07) : rgba(0, 0, 0, 0.08);
+    out property <color> hover: dark ? rgba(255, 255, 255, 0.06) : rgba(0, 0, 0, 0.05);
+    out property <color> active: dark ? rgba(255, 255, 255, 0.11) : rgba(0, 0, 0, 0.08);
+    out property <color> danger: #ff453a;
+    out property <color> warn: #ff9f0a;
+    out property <color> ok: #30d158;
+
+    // 度量（对应 Theme.Metrics）
+    out property <length> sidebar-min: 180px;
+    out property <length> sidebar-max: 320px;
+    out property <length> sidebar-default: 220px;
+    out property <length> radius: 8px;
+
+    // 标签分组预设色（对应 macOS 端 TabGroup.GroupColor）
+    public function group-color(i: int) -> color {
+        if (i == 0) { return #8e8e93; }
+        if (i == 1) { return #0a84ff; }
+        if (i == 2) { return #bf5af2; }
+        if (i == 3) { return #ff375f; }
+        if (i == 4) { return #ff453a; }
+        if (i == 5) { return #ff9f0a; }
+        if (i == 6) { return #ffd60a; }
+        if (i == 7) { return #30d158; }
+        return #64d2ff;
+    }
+}

@@ -1,0 +1,138 @@
+// Git 工具全局状态（当前激活 Git 标签镜像）。
+export struct GitChangeRow {
+    path: string,
+    status: string,
+    untracked: bool,
+}
+
+export struct GitCommitRow {
+    hash: string,
+    short: string,
+    author: string,
+    date: string,
+    subject: string,
+}
+
+export struct GitBranchRow {
+    name: string,
+    current: bool,
+    remote: bool,
+}
+
+export struct GitStashRow {
+    index: int,
+    message: string,
+}
+
+export struct GitDiffRow {
+    kind: int,        // 0 context 1 add 2 del 3 hunk 4 meta
+    left-no: int,
+    right-no: int,
+    text: string,
+}
+
+export struct GitRepoNode {
+    id: string,
+    name: string,
+    is-folder: bool,
+    depth: int,
+    expanded: bool,
+    has-children: bool,
+    bound: bool,
+}
+
+export struct GitKeyRow {
+    id: string,
+    name: string,
+    algorithm: string,
+    fingerprint: string,
+    bound: bool,
+}
+
+export global GitUI {
+    // 仓库选择 / 登记
+    in-out property <bool> repo-open;
+    in-out property <[GitRepoNode]> repos;
+    in-out property <string> repo-path;
+    in-out property <string> repo-alias;
+    // 横幅
+    in-out property <string> banner-branch;
+    in-out property <int> ahead: 0;
+    in-out property <int> behind: 0;
+    in-out property <int> conflict-count: 0;
+    in-out property <bool> rebasing;
+    in-out property <string> remote-url;
+    in-out property <string> bound-key-name;
+    // 变更
+    in-out property <[GitChangeRow]> changes-conflict;
+    in-out property <[GitChangeRow]> changes-unstaged;
+    in-out property <[GitChangeRow]> changes-staged;
+    in-out property <[GitCommitRow]> changes-unpushed; // 未推送提交行
+    in-out property <int> selected-list: 0;            // 当前选中分区
+    in-out property <int> selected-index: -1;
+    // diff
+    in-out property <[GitDiffRow]> diff;
+    in-out property <string> diff-path;
+    // 提交
+    in-out property <string> commit-message;
+    in-out property <bool> amend;
+    // 分支 / stash / 历史
+    in-out property <[GitBranchRow]> branches;
+    in-out property <[GitStashRow]> stashes;
+    in-out property <[GitCommitRow]> history;
+    in-out property <bool> has-more-history;
+    // 密钥
+    in-out property <[GitKeyRow]> keys;
+    // 输出控制台 / toast
+    in-out property <bool> console-visible;
+    in-out property <string> console-text;
+    in-out property <string> toast;
+    in-out property <int> toast-kind: 0; // 0 ok 1 warn
+    in-out property <string> new-branch-name;
+    in-out property <string> clone-url;
+    in-out property <string> clone-parent;
+    in-out property <string> clone-alias;
+    in-out property <string> status;
+    in-out property <bool> busy;
+
+    callback open-repo-path();
+    callback browse-repo-path();
+    callback register-repo();
+    callback close-repo();
+    callback repo-selected(int);
+    callback repo-deleted(int);
+    callback clone-start();
+    callback refresh-all();
+    callback stage(int, int);
+    callback unstage(int, int);
+    callback stage-all(int);
+    callback unstage-all(int);
+    callback discard(int, int);
+    callback select-change(int, int);
+    callback commit();
+    callback branch-new();
+    callback branch-switch(int);
+    callback branch-delete(int, bool);
+    callback merge-branch(int);
+    callback stash-push();
+    callback stash-pop(int);
+    callback stash-drop(int);
+    callback history-more();
+    callback history-menu(int, int); // index + action 0 cherry 1 reset-soft 2 reset-mixed 3 reset-hard 4 copy-hash
+    callback fetch();
+    callback pull();
+    callback push();
+    callback pull-push();
+    callback conflict-ours(int);
+    callback conflict-theirs(int);
+    callback conflict-resolved(int);
+    callback keys-open();
+    callback key-generate();
+    callback key-import();
+    callback key-delete(int);
+    callback key-copy-public(int);
+    callback bind-key(int);
+    callback unbind-key();
+    callback edit-remote-url(string);
+    callback rebase-abort();
+}

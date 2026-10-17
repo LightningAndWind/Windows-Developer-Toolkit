@@ -1,0 +1,27 @@
+[package]
+name = "devkit"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "devkit"
+path = "src/main.rs"
+
+[build-dependencies]
+slint-build = "1.13"
+
+[dependencies]
+slint = { version = "1.13", default-features = false, features = ["std", "backend-winit", "renderer-femtovg", "accessibility", "compat-1-18"] }
+devkit-core = { path = "../core" }
+devkit-tools = { path = "../tools" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+anyhow.workspace = true
+crossbeam-channel.workspace = true
+rfd = "0.15"
+open = "5"
+arboard = "3"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }

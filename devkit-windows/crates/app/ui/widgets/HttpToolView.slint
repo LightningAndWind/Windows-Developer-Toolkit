@@ -1,0 +1,636 @@
+﻿// HTTP 工具视图：请求区（方法+URL+分区表格）上下分栏 + 响应区四视图。
+import { ListView, ComboBox, LineEdit, TextEdit } from "std-widgets.slint";
+import { Theme } from "../globals/Theme.slint";
+import { HttpUI, KvRow, HttpHistoryRow, HttpTreeNode } from "../globals/HttpUI.slint";
+
+component HButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> on: false;
+    in property <bool> danger: false;
+    callback clicked;
+
+    height: 28px;
+    min-width: 44px;
+    padding-left: 10px;
+    padding-right: 10px;
+    border-radius: 6px;
+    background: ta.has-hover ? (danger ? Theme.danger : Theme.hover) : (on ? Theme.accent-soft : transparent);
+    border-width: 1px;
+    border-color: on ? Theme.accent : Theme.divider;
+
+    ta := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.clicked(); }
+    }
+
+    Text {
+        text: root.label;
+        font-size: 12px;
+        color: root.on ? Theme.accent : (root.danger ? Theme.danger : Theme.text);
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component Seg inherits Rectangle {
+    in property <string> label;
+    in property <bool> on;
+    callback clicked;
+
+    min-width: 48px;
+    border-radius: 6px;
+    background: on ? Theme.accent : (ta.has-hover ? Theme.hover : transparent);
+
+    ta := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.clicked(); }
+    }
+
+    Text {
+        text: root.label;
+        font-size: 12px;
+        color: on ? #ffffff : Theme.text;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component KvTable inherits Rectangle {
+    in property <int> table-index;
+    in property <[KvRow]> rows;
+    in property <bool> show-toggle: true;
+
+    VerticalLayout {
+        // 表头
+        Rectangle {
+            height: 24px;
+            HorizontalLayout {
+                padding-left: 6px;
+                padding-right: 6px;
+                spacing: 6px;
+                Text { text: "键"; width: 34%; color: Theme.text-secondary; font-size: 11px; vertical-alignment: center; }
+                Text { text: "值"; horizontal-stretch: 1; color: Theme.text-secondary; font-size: 11px; vertical-alignment: center; }
+                Rectangle { width: 46px; }
+            }
+        }
+
+        ListView {
+            for kv[index] in root.rows: Rectangle {
+                height: 30px;
+                HorizontalLayout {
+                    padding-left: 6px;
+                    padding-right: 6px;
+                    spacing: 6px;
+
+                    LineEdit {
+                        width: 34%;
+                        text: kv.key;
+                        enabled: kv.enabled;
+                        font-size: 12px;
+                        edited(t) => { HttpUI.kv-edited(root.table-index, index, 0, t); }
+                    }
+                    LineEdit {
+                        horizontal-stretch: 1;
+                        text: kv.value;
+                        enabled: kv.enabled;
+                        font-size: 12px;
+                        edited(t) => { HttpUI.kv-edited(root.table-index, index, 1, t); }
+                    }
+
+                    Rectangle {
+                        width: 40px;
+                        height: 20px;
+                        y: 5px;
+                        border-radius: 10px;
+                        background: kv.enabled ? Theme.accent : Theme.divider;
+
+                        tog := TouchArea {
+                            clicked => { HttpUI.kv-toggled(root.table-index, index); }
+                        }
+
+                        Rectangle {
+                            width: 16px;
+                            height: 16px;
+                            x: kv.enabled ? parent.width - 18px : 2px;
+                            y: 2px;
+                            border-radius: 8px;
+                            background: #ffffff;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 26px;
+                        Text {
+                            text: "✕";
+                            color: Theme.danger;
+                            font-size: 12px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        del-ta := TouchArea {
+                            clicked => { HttpUI.kv-deleted(root.table-index, index); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component HttpToolView inherits Rectangle {
+    background: Theme.content-bg;
+
+    VerticalLayout {
+        // ===== 请求栏 =====
+        Rectangle {
+            height: 42px;
+            HorizontalLayout {
+                padding: 6px;
+                spacing: 6px;
+
+                ComboBox {
+                    width: 108px;
+                    model: ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
+                    current-value: HttpUI.method;
+                    selected(m) => { HttpUI.method = m; }
+                }
+
+                LineEdit {
+                    horizontal-stretch: 1;
+                    placeholder-text: "https://api.example.com/path";
+                    text: HttpUI.url;
+                    font-size: 13px;
+                    edited(t) => { HttpUI.url = t; HttpUI.dirty = true; }
+                }
+
+                HButton {
+                    label: "从 URL 解析";
+                    clicked => { HttpUI.url-parsed(); }
+                }
+
+                if !HttpUI.sending: HButton {
+                    label: "发送";
+                    on: true;
+                    clicked => { HttpUI.send(); }
+                }
+                if HttpUI.sending: HButton {
+                    label: "停止";
+                    danger: true;
+                    clicked => { HttpUI.stop(); }
+                }
+
+                HButton {
+                    label: HttpUI.dirty ? "保存 *" : "保存";
+                    on: true;
+                    clicked => { HttpUI.save(); }
+                }
+                HButton {
+                    label: "另存为…";
+                    clicked => { HttpUI.save-as-dialog(); }
+                }
+                HButton {
+                    label: "cURL";
+                    clicked => { HttpUI.copy-curl(); }
+                }
+                HButton {
+                    label: "…";
+                    clicked => { HttpUI.clear-request(); }
+                }
+            }
+        }
+
+        // ===== 上下分栏 =====
+        VerticalLayout {
+            spacing: 0;
+
+            // 请求编辑器
+            Rectangle {
+                vertical-stretch: 1;
+
+                VerticalLayout {
+                    // 分区切换
+                    Rectangle {
+                        height: 34px;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            spacing: 4px;
+                            alignment: start;
+
+                            Seg { label: "Params"; on: HttpUI.editor-tab == 0; clicked => { HttpUI.editor-tab-changed(0); } }
+                            Seg { label: "Headers"; on: HttpUI.editor-tab == 1; clicked => { HttpUI.editor-tab-changed(1); } }
+                            Seg { label: "Body"; on: HttpUI.editor-tab == 2; clicked => { HttpUI.editor-tab-changed(2); } }
+                            Seg { label: "Auth"; on: HttpUI.editor-tab == 3; clicked => { HttpUI.editor-tab-changed(3); } }
+                            Seg { label: "历史"; on: HttpUI.editor-tab == 4; clicked => { HttpUI.editor-tab-changed(4); } }
+                            Rectangle { horizontal-stretch: 1; }
+                            Text {
+                                text: HttpUI.saved-name == "" ? "未保存" : "已保存：\{HttpUI.saved-name}";
+                                color: Theme.text-secondary;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    // 分区内容
+                    if HttpUI.editor-tab == 0: Rectangle {
+                        vertical-stretch: 1;
+
+                        KvTable { table-index: 0; rows: HttpUI.params; }
+                    }
+
+                    if HttpUI.editor-tab == 1: Rectangle {
+                        vertical-stretch: 1;
+
+                        KvTable { table-index: 1; rows: HttpUI.headers; }
+                    }
+
+                    if HttpUI.editor-tab == 2: Rectangle {
+                        vertical-stretch: 1;
+
+                        VerticalLayout {
+                            spacing: 6px;
+
+                            Rectangle {
+                                height: 30px;
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    spacing: 4px;
+                                    alignment: start;
+
+                                    Seg { label: "无"; on: HttpUI.body-kind == 0; clicked => { HttpUI.body-kind-changed(0); } }
+                                    Seg { label: "JSON"; on: HttpUI.body-kind == 1; clicked => { HttpUI.body-kind-changed(1); } }
+                                    Seg { label: "Form"; on: HttpUI.body-kind == 2; clicked => { HttpUI.body-kind-changed(2); } }
+                                    Seg { label: "Raw"; on: HttpUI.body-kind == 3; clicked => { HttpUI.body-kind-changed(3); } }
+                                    if HttpUI.body-kind == 1: HButton {
+                                        label: "格式化 JSON";
+                                        clicked => { HttpUI.body-formatted(); }
+                                    }
+                                }
+                            }
+
+                            if HttpUI.body-kind == 1 || HttpUI.body-kind == 3: Rectangle {
+                                vertical-stretch: 1;
+
+                                TextEdit {
+                                    x: 8px;
+                                    width: parent.width - 16px;
+                                    height: parent.height;
+                                    text <=> HttpUI.body-text;
+                                    font-family: "Consolas";
+                                    font-size: 12px;
+                                    wrap: no-wrap;
+                                }
+                            }
+
+                            if HttpUI.body-kind == 2: Rectangle {
+                                vertical-stretch: 1;
+
+                                KvTable { table-index: 2; rows: HttpUI.form; }
+                            }
+                        }
+                    }
+
+                    if HttpUI.editor-tab == 3: Rectangle {
+                        vertical-stretch: 1;
+
+                        VerticalLayout {
+                            padding: 12px;
+                            spacing: 8px;
+
+                            HorizontalLayout {
+                                spacing: 4px;
+                                alignment: start;
+
+                                Seg { label: "无"; on: HttpUI.auth-kind == 0; clicked => { HttpUI.auth-kind-changed(0); } }
+                                Seg { label: "Bearer"; on: HttpUI.auth-kind == 1; clicked => { HttpUI.auth-kind-changed(1); } }
+                                Seg { label: "Basic"; on: HttpUI.auth-kind == 2; clicked => { HttpUI.auth-kind-changed(2); } }
+                            }
+
+                            if HttpUI.auth-kind == 1: Rectangle {
+                                height: 34px;
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Text { text: "Token"; width: 70px; color: Theme.text-secondary; vertical-alignment: center; font-size: 12px; }
+                                    LineEdit { horizontal-stretch: 1; text <=> HttpUI.auth-token; font-size: 12px; }
+                                }
+                            }
+
+                            if HttpUI.auth-kind == 2: Rectangle {
+                                height: 34px;
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Text { text: "用户名"; width: 70px; color: Theme.text-secondary; vertical-alignment: center; font-size: 12px; }
+                                    LineEdit { width: 40%; text <=> HttpUI.auth-user; font-size: 12px; }
+                                    Text { text: "密码"; width: 50px; color: Theme.text-secondary; vertical-alignment: center; font-size: 12px; }
+                                    LineEdit { horizontal-stretch: 1; text <=> HttpUI.auth-pass; font-size: 12px; }
+                                }
+                            }
+
+                            Rectangle {
+                                height: 34px;
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Text { text: "超时"; width: 70px; color: Theme.text-secondary; vertical-alignment: center; font-size: 12px; }
+                                    HButton {
+                                        label: "\{HttpUI.timeout-secs} 秒（空闲）";
+                                        clicked => { HttpUI.timeout-cycled(); }
+                                    }
+                                    Rectangle { horizontal-stretch: 1; }
+                                }
+                            }
+                        }
+                    }
+
+                    if HttpUI.editor-tab == 4: Rectangle {
+                        vertical-stretch: 1;
+
+                        VerticalLayout {
+                            Rectangle {
+                                height: 32px;
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    padding-right: 8px;
+                                    spacing: 6px;
+
+                                    LineEdit {
+                                        horizontal-stretch: 1;
+                                        placeholder-text: "搜索历史…";
+                                        font-size: 12px;
+                                        accepted(t) => { HttpUI.history-searched(t); }
+                                    }
+                                    HButton { label: "刷新"; clicked => { HttpUI.history-reload(); } }
+                                }
+                            }
+
+                            ListView {
+                                for h[index] in HttpUI.history: Rectangle {
+                                    height: 40px;
+                                    background: row-ta.has-hover ? Theme.hover : transparent;
+
+                                    row-ta := TouchArea {
+                                        clicked => { HttpUI.history-selected(index); }
+                                    }
+
+                                    HorizontalLayout {
+                                        padding-left: 8px;
+                                        padding-right: 8px;
+                                        spacing: 8px;
+
+                                        Text {
+                                            text: h.method;
+                                            width: 56px;
+                                            color: Theme.accent;
+                                            font-family: "Consolas";
+                                            font-size: 11px;
+                                            font-weight: 700;
+                                            vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: h.url;
+                                            color: Theme.text;
+                                            font-size: 12px;
+                                            overflow: elide;
+                                            vertical-alignment: center;
+                                            horizontal-stretch: 1;
+                                        }
+                                        Text {
+                                            text: h.time-text;
+                                            color: Theme.text-secondary;
+                                            font-size: 11px;
+                                            width: 90px;
+                                            vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: h.status-code < 0 ? "—" : "\{h.status-code}";
+                                            color: h.status-code < 0 ? Theme.text-secondary : (h.status-code < 400 ? Theme.ok : Theme.danger);
+                                            font-family: "Consolas";
+                                            font-size: 12px;
+                                            width: 40px;
+                                            vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: h.duration-text;
+                                            color: Theme.text-secondary;
+                                            font-size: 11px;
+                                            width: 60px;
+                                            vertical-alignment: center;
+                                        }
+                                        Rectangle {
+                                            width: 24px;
+                                            Text { text: "↻"; color: Theme.text-secondary; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
+                                            TouchArea { clicked => { HttpUI.history-resent(index); } }
+                                        }
+                                        Rectangle {
+                                            width: 24px;
+                                            Text { text: "✕"; color: Theme.danger; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                                            TouchArea { clicked => { HttpUI.history-deleted(index); } }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 表格添加行按钮（参数/头/表单）
+                    if HttpUI.editor-tab < 2 || (HttpUI.editor-tab == 2 && HttpUI.body-kind == 2): Rectangle {
+                        height: 30px;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            alignment: start;
+                            HButton {
+                                label: "＋ 添加行";
+                                clicked => {
+                                    if (HttpUI.editor-tab == 0) { HttpUI.kv-added(0); }
+                                    if (HttpUI.editor-tab == 1) { HttpUI.kv-added(1); }
+                                    if (HttpUI.editor-tab == 2) { HttpUI.kv-added(2); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 分割指示（M3 简化为固定比例，拖拽分栏 M7 增强）
+            Rectangle { height: 1px; background: Theme.divider; }
+
+            // 响应区
+            Rectangle {
+                vertical-stretch: 1;
+
+                VerticalLayout {
+                    Rectangle {
+                        height: 34px;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            spacing: 4px;
+                            alignment: start;
+
+                            Seg { label: "美化"; on: HttpUI.resp-tab == 0; clicked => { HttpUI.resp-tab-changed(0); } }
+                            Seg { label: "原始"; on: HttpUI.resp-tab == 1; clicked => { HttpUI.resp-tab-changed(1); } }
+                            Seg { label: "Headers"; on: HttpUI.resp-tab == 2; clicked => { HttpUI.resp-tab-changed(2); } }
+                            Seg { label: "预览"; on: HttpUI.resp-tab == 3; clicked => { HttpUI.resp-tab-changed(3); } }
+                            Rectangle { horizontal-stretch: 1; }
+                            HButton { label: "复制"; clicked => { HttpUI.copy-body(); } }
+                        }
+                    }
+
+                    Rectangle {
+                        height: 24px;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            spacing: 10px;
+                            Text {
+                                text: HttpUI.resp-status-line;
+                                color: HttpUI.resp-ok ? Theme.ok : Theme.danger;
+                                font-family: "Consolas";
+                                font-size: 12px;
+                                font-weight: 700;
+                                vertical-alignment: center;
+                            }
+                            if HttpUI.resp-truncated: Text {
+                                text: "⚠ 超过 10MB 已截断";
+                                color: Theme.warn;
+                                font-size: 11px;
+                                vertical-alignment: center;
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                    }
+
+                    if HttpUI.resp-error != "": Rectangle {
+                        vertical-stretch: 1;
+                        Text {
+                            text: HttpUI.resp-error;
+                            color: Theme.text-secondary;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    if HttpUI.resp-error == "" && (HttpUI.resp-tab == 0 || HttpUI.resp-tab == 1): Rectangle {
+                        vertical-stretch: 1;
+
+                        TextEdit {
+                            x: 8px;
+                            width: parent.width - 16px;
+                            height: parent.height;
+                            text: HttpUI.resp-tab == 0 ? HttpUI.resp-body : HttpUI.resp-body;
+                            read-only: true;
+                            font-family: "Consolas";
+                            font-size: 12px;
+                            wrap: no-wrap;
+                        }
+                    }
+
+                    if HttpUI.resp-error == "" && HttpUI.resp-tab == 2: Rectangle {
+                        vertical-stretch: 1;
+
+                        TextEdit {
+                            x: 8px;
+                            width: parent.width - 16px;
+                            height: parent.height;
+                            text: HttpUI.resp-headers-text;
+                            read-only: true;
+                            font-family: "Consolas";
+                            font-size: 12px;
+                            wrap: no-wrap;
+                        }
+                    }
+
+                    if HttpUI.resp-error == "" && HttpUI.resp-tab == 3: Rectangle {
+                        vertical-stretch: 1;
+
+                        if HttpUI.resp-image-ok: VerticalLayout {
+                            alignment: center;
+                            Image {
+                                source: HttpUI.resp-image;
+                                image-fit: ImageFit.contain;
+                            }
+                        }
+
+                        if !HttpUI.resp-image-ok: Text {
+                            text: "预览视图：图片响应（image/*）直接显示；HTML 渲染需 WebView 能力，暂以文本方式查看";
+                            color: Theme.text-secondary;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 底部状态条
+        Rectangle {
+            height: 26px;
+            background: Theme.sidebar-bg;
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                Text {
+                    text: HttpUI.status;
+                    color: Theme.text-secondary;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+    }
+
+    // ===== 另存为对话框 =====
+    if HttpUI.save-dialog-visible: Rectangle {
+        background: rgba(0, 0, 0, 0.35);
+
+        Rectangle {
+            width: 460px;
+            height: 300px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: 12px;
+            background: Theme.content-bg;
+            border-width: 1px;
+            border-color: Theme.divider;
+
+            VerticalLayout {
+                padding: 18px;
+                spacing: 10px;
+
+                Text { text: "保存请求"; font-size: 16px; font-weight: 600; color: Theme.text; }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text { text: "名称"; width: 60px; color: Theme.text-secondary; vertical-alignment: center; font-size: 12px; }
+                    LineEdit { horizontal-stretch: 1; text <=> HttpUI.save-name-input; font-size: 12px; }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text { text: "目录"; width: 60px; color: Theme.text-secondary; vertical-alignment: center; font-size: 12px; }
+                    ComboBox {
+                        horizontal-stretch: 1;
+                        model: HttpUI.save-folder-options;
+                        current-index <=> HttpUI.save-combo-index;
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text { text: "新建文件夹"; width: 60px; color: Theme.text-secondary; vertical-alignment: center; font-size: 12px; }
+                    LineEdit { horizontal-stretch: 1; placeholder-text: "可选，多级用 / 分隔"; text <=> HttpUI.save-new-folder; font-size: 12px; }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 10px;
+                    HButton { label: "取消"; clicked => { HttpUI.save-dialog-cancel(); } }
+                    HButton { label: "保存"; on: true; clicked => { HttpUI.save-dialog-confirm(); } }
+                }
+            }
+        }
+    }
+}

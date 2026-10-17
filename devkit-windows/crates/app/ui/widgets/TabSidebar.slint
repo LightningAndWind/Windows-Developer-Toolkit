@@ -1,0 +1,306 @@
+// 左侧竖向标签栏：分组标签列表 + 新建按钮 + 底部操作条（设置 / 防休眠 / 外观）。
+import { ListView } from "std-widgets.slint";
+import { Theme } from "../globals/Theme.slint";
+import { AppState, TabItemData, SidebarRow } from "../globals/AppState.slint";
+
+component TabRow inherits Rectangle {
+    in property <TabItemData> data;
+    in property <int> indent: 0;
+    in property <bool> active;
+
+    height: 36px;
+    border-radius: 7px;
+    background: active ? Theme.active : (ta.has-hover ? Theme.hover : transparent);
+
+    ta := TouchArea {
+        clicked => { AppState.select-tab(data.id); }
+        double-clicked => { AppState.rename-requested(data.id); }
+    }
+
+    HorizontalLayout {
+        padding-left: 10px + root.indent * 16px;
+        padding-right: 8px;
+        spacing: 8px;
+
+        Text {
+            text: data.icon;
+            width: 18px;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: data.title;
+            color: Theme.text;
+            font-size: 13px;
+            overflow: elide;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+
+        if data.dirty: Rectangle {
+            width: 7px;
+            height: 7px;
+            y: (parent.height - 7px) / 2;
+            border-radius: 4px;
+            background: Theme.accent;
+        }
+
+        // 移入分组（悬停显示）
+        Rectangle {
+            width: 20px;
+            height: 18px;
+            y: (parent.height - 18px) / 2;
+            border-radius: 5px;
+            visible: ta.has-hover && AppState.groups.length > 0;
+            background: mv-ta.has-hover ? Theme.hover : transparent;
+
+            mv-ta := TouchArea {
+                clicked => { AppState.open-group-picker(data.id); }
+            }
+
+            Text {
+                text: "⋯";
+                font-size: 11px;
+                color: Theme.text-secondary;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        Rectangle {
+            width: 18px;
+            height: 18px;
+            y: (parent.height - 18px) / 2;
+            border-radius: 9px;
+            visible: ta.has-hover;
+            background: close-ta.has-hover ? Theme.hover : transparent;
+
+            close-ta := TouchArea {
+                clicked => { AppState.close-tab(data.id); }
+            }
+
+            Text {
+                text: "✕";
+                font-size: 10px;
+                color: Theme.text-secondary;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
+component GroupHeader inherits Rectangle {
+    in property <SidebarRow> row;
+
+    height: 28px;
+    border-radius: 6px;
+    background: ta.has-hover ? Theme.hover : transparent;
+
+    ta := TouchArea {
+        clicked => { AppState.toggle-group(row.group-id); }
+    }
+
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 6px;
+        spacing: 6px;
+
+        Text {
+            width: 12px;
+            text: row.collapsed ? "▸" : "▾";
+            color: Theme.text-secondary;
+            font-size: 10px;
+            vertical-alignment: center;
+        }
+
+        Rectangle {
+            width: 8px;
+            height: 8px;
+            y: 10px;
+            border-radius: 4px;
+            background: Theme.group-color(row.color-index);
+        }
+
+        Text {
+            text: row.name;
+            color: Theme.text;
+            font-size: 12px;
+            font-weight: 600;
+            overflow: elide;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+
+        Text {
+            text: "\{row.group-count}";
+            color: Theme.text-secondary;
+            font-size: 10px;
+            vertical-alignment: center;
+        }
+
+        Rectangle {
+            width: 18px;
+            height: 18px;
+            y: 5px;
+            border-radius: 5px;
+            visible: ta.has-hover;
+            background: del-ta.has-hover ? Theme.danger : transparent;
+
+            del-ta := TouchArea {
+                clicked => { AppState.delete-group(row.group-id); }
+            }
+
+            Text {
+                text: "✕";
+                font-size: 9px;
+                color: del-ta.has-hover ? #ffffff : Theme.text-secondary;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
+component FooterButton inherits Rectangle {
+    in property <string> icon;
+    in property <bool> on;
+    callback clicked;
+
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
+    background: ta.has-hover ? Theme.hover : (on ? Theme.accent-soft : transparent);
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    Text {
+        text: root.icon;
+        font-size: 15px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export component TabSidebar inherits Rectangle {
+    background: Theme.sidebar-bg;
+
+    VerticalLayout {
+        // 顶部占位（对应 Mac 端红绿灯区域）
+        Rectangle { height: 12px; }
+
+        // 标签列表（分组头 + 成员 + 未分组）
+        Rectangle {
+            horizontal-stretch: 1;
+            ListView {
+                x: 6px;
+                width: parent.width - 12px;
+
+                for row in AppState.sidebar-rows: Rectangle {
+                    width: parent.width;
+
+                    if row.kind == 0: GroupHeader { row: row; }
+                    if row.kind == 1: TabRow {
+                        data: row.tab;
+                        indent: row.group-id == "" ? 0 : 1;
+                        active: row.tab.id == AppState.active-id;
+                    }
+                }
+            }
+        }
+
+        // 新建按钮行
+        Rectangle {
+            height: 40px;
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 6px;
+                alignment: start;
+
+                Rectangle {
+                    width: 92px;
+                    height: 30px;
+                    border-radius: 7px;
+                    background: nt-ta.has-hover ? Theme.hover : Theme.active;
+
+                    nt-ta := TouchArea {
+                        clicked => { AppState.new-tab(""); }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        spacing: 6px;
+                        Text {
+                            text: "＋";
+                            color: Theme.text-secondary;
+                            font-size: 14px;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: "新标签";
+                            color: Theme.text-secondary;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: 92px;
+                    height: 30px;
+                    border-radius: 7px;
+                    background: ng-ta.has-hover ? Theme.hover : Theme.active;
+
+                    ng-ta := TouchArea {
+                        clicked => { AppState.new-group(); }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        spacing: 6px;
+                        Text {
+                            text: "▦";
+                            color: Theme.text-secondary;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+                        Text {
+                            text: "新分组";
+                            color: Theme.text-secondary;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 底部操作条
+        Rectangle {
+            height: 44px;
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 6px;
+                alignment: start;
+
+                FooterButton {
+                    icon: "⚙";
+                    clicked => { AppState.settings-opened(); }
+                }
+                FooterButton {
+                    icon: "☕";
+                    on: AppState.prevent-sleep;
+                    clicked => { AppState.sleep-toggled(); }
+                }
+                FooterButton {
+                    icon: "◐";
+                    clicked => { AppState.appearance-cycled(); }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,108 @@
+// 终端视图：按行/跨段渲染 ANSI 输出网格，行高固定、跨段同色合并。
+// 数据由 Rust 侧 TermFrame 同步进 lines 模型；键盘事件回传 Rust 编码后写 PTY。
+import { ListView } from "std-widgets.slint";
+import { Theme } from "../globals/Theme.slint";
+
+export struct TermSpan {
+    text: string,
+    fg: color,
+    bg: color,
+    bold: bool,
+    underline: bool,
+}
+
+export struct TermLine {
+    spans: [TermSpan],
+}
+
+// 终端桥接全局：Rust 侧通过它读写终端状态（避免嵌套元素访问器限制）。
+export global TermHostUI {
+    in-out property <[TermLine]> lines;
+    in-out property <int> pulse;
+    in-out property <float> cols-f: 80.0;
+    in-out property <float> rows-f: 24.0;
+    in-out property <color> term-bg: #18181b;
+    callback send-key(string, bool, bool, bool);
+    callback geometry-changed();
+}
+
+export component TerminalView inherits Rectangle {
+    in-out property <[TermLine]> lines <=> TermHostUI.lines;
+    in-out property <int> pulse <=> TermHostUI.pulse;
+    in-out property <color> term-bg <=> TermHostUI.term-bg;
+    // 视口内可见行数/列数（浮点，Rust 侧取整）
+    out property <float> cols-f: Math.max(2.0, Math.floor(((self.width - 16px) / 1px) / (root.char-width / 1px)));
+    out property <float> rows-f: Math.max(2.0, Math.floor((self.height / 1px) / (root.row-height / 1px)));
+
+    in property <length> font-size: 14px;
+    out property <length> row-height: font-size * 1.45;
+    out property <length> char-width: font-size * 0.62;
+    in property <string> mono-font: "Consolas";
+
+    background: root.term-bg;
+
+    lv := ListView {
+        x: 8px;
+        width: parent.width - 16px;
+        height: parent.height;
+
+        for line in root.lines: Rectangle {
+            height: root.row-height;
+            background: transparent;
+
+            HorizontalLayout {
+                spacing: 0;
+
+                for sp in line.spans: Rectangle {
+                    background: sp.bg;
+                    horizontal-stretch: 0;
+
+                    Text {
+                        text: sp.text;
+                        color: sp.fg;
+                        font-family: root.mono-font;
+                        font-size: root.font-size;
+                        font-weight: sp.bold ? 700 : 400;
+                        vertical-alignment: center;
+                    }
+
+                    if sp.underline: Rectangle {
+                        height: 1px;
+                        y: parent.height - 2px;
+                        background: sp.fg;
+                    }
+                }
+            }
+        }
+    }
+
+    fs := FocusScope {
+        key-pressed(e) => {
+            TermHostUI.send-key(e.text, e.modifiers.control, e.modifiers.alt, e.modifiers.shift);
+            accept
+        }
+    }
+
+    init => {
+        fs.focus();
+        TermHostUI.cols-f = root.cols-f;
+        TermHostUI.rows-f = root.rows-f;
+    }
+
+    public function grab-focus() {
+        fs.focus();
+    }
+
+    changed pulse => {
+        lv.content-y = Math.min(0, lv.height - lv.content-height);
+    }
+
+    changed width => {
+        TermHostUI.cols-f = root.cols-f;
+        TermHostUI.geometry-changed();
+    }
+    changed height => {
+        TermHostUI.rows-f = root.rows-f;
+        TermHostUI.geometry-changed();
+    }
+}

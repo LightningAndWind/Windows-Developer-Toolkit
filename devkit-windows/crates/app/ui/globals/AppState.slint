@@ -1,0 +1,113 @@
+// 应用全局状态：标签集合、选择、Launcher、外观与防休眠开关。
+// 状态真源在 Rust；这里只做镜像与回调。
+import { Theme } from "Theme.slint";
+
+export struct TabItemData {
+    id: string,
+    tool-id: string,
+    title: string,
+    icon: string,
+    dirty: bool,
+    group-id: string,   // 空 = 未分组
+}
+
+export struct LauncherTool {
+    id: string,
+    title: string,
+    icon: string,
+    subtitle: string,
+}
+
+export struct SettingsRow {
+    id: string,
+    title: string,
+    subtitle: string,
+}
+
+export struct TabGroupData {
+    id: string,
+    name: string,
+    color-index: int,   // 0..8 对应预设色
+    collapsed: bool,
+}
+
+// 侧栏统一行模型：0=分组头 1=标签
+export struct SidebarRow {
+    kind: int,
+    name: string,          // 分组名
+    color-index: int,
+    collapsed: bool,
+    group-id: string,
+    tab: TabItemData,
+    group-count: int,
+}
+
+export global AppState {
+    in-out property <[TabItemData]> tabs;
+    in-out property <string> active-id;
+    in-out property <string> active-tool-id;
+    in-out property <bool> launcher-visible: true;
+    in-out property <length> sidebar-width: Theme.sidebar-default;
+
+    // 首次启动引导
+    in-out property <bool> needs-onboarding: false;
+    in-out property <string> onboarding-error;
+
+    // 设置面板
+    in-out property <bool> settings-visible: false;
+    in-out property <int> settings-tab: 0;   // 0通用 1HTTP历史 2终端会话 3Git仓库
+    in-out property <[SettingsRow]> settings-rows;
+    in-out property <string> settings-summary;
+    in-out property <string> data-dir-path;
+
+    // 标签重命名
+    in-out property <bool> rename-dialog-visible: false;
+    in-out property <string> rename-input;
+
+    // 标签分组（M7）
+    in-out property <[TabGroupData]> groups;
+    in-out property <[SidebarRow]> sidebar-rows;
+    in-out property <bool> group-picker-visible;
+    in-out property <string> group-picker-tab;   // 待移动的标签 id
+
+    // Launcher 搜索过滤后的工具卡片（按分类分组，由 Rust 侧过滤）
+    in-out property <[LauncherTool]> tools-network;
+    in-out property <[LauncherTool]> tools-terminal;
+    in-out property <[LauncherTool]> tools-data;
+    in-out property <[LauncherTool]> tools-utility;
+
+    // 偏好镜像
+    in-out property <bool> prevent-sleep: false;
+    in-out property <int> appearance-mode: 0; // 0=跟随系统 1=浅色 2=深色
+
+    callback new-tab(string);
+    callback select-tab(string);
+    callback close-tab(string);
+    callback sidebar-width-changed();
+    callback sleep-toggled();
+    callback appearance-cycled();
+    callback settings-opened();
+    callback launcher-search(string);
+    callback choose-data-dir();
+    callback use-default-dir();
+    // M7
+    callback select-tab-index(int);
+    callback close-current-tab();
+    callback rename-requested(string);
+    callback rename-confirm();
+    callback rename-cancel();
+    callback settings-closed();
+    callback settings-tab-changed(int);
+    callback settings-row-deleted(string);
+    callback settings-history-cleared();
+    callback open-data-dir();
+    callback set-appearance(int);
+    // 标签分组（M7）
+    callback new-group();
+    callback delete-group(string);
+    callback toggle-group(string);
+    callback open-group-picker(string);
+    callback close-group-picker();
+    callback move-tab-to-group(string);   // 参数 = 目标分组 id（"" = 未分组）
+    callback new-group-for-picker();
+}

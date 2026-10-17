@@ -1,7 +1,8 @@
-﻿// Git 工具视图：仓库登记 → 横幅 + 四组变更 + diff + 提交栏 + 分支/Stash/历史。
+// Git 工具视图：仓库登记 → 横幅 + 四组变更 + diff + 提交栏 + 分支/Stash/历史。
 import { ListView, LineEdit, CheckBox } from "std-widgets.slint";
 import { Theme } from "../globals/Theme.slint";
 import { GitUI, GitChangeRow, GitCommitRow, GitBranchRow, GitStashRow, GitDiffRow, GitRepoNode, GitKeyRow } from "../globals/GitUI.slint";
+import { AppState } from "../globals/AppState.slint";
 
 component GButton inherits Rectangle {
     in property <string> label;
@@ -94,6 +95,31 @@ export component GitToolView inherits Rectangle {
                 GButton { label: "登记仓库…"; on: true; clicked => { GitUI.open-repo-path(); } }
                 GButton { label: "克隆仓库…"; clicked => { GitUI.clone-start(); } }
                 GButton { label: "密钥管理"; clicked => { GitUI.keys-open(); } }
+            }
+
+            // 缺失 Git 时的一键安装横幅
+            if AppState.git-missing: Rectangle {
+                height: 46px;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: Theme.warn;
+
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    spacing: 8px;
+
+                    Text {
+                        text: "未检测到 Git，Git 工具不可用。可一键安装便携版（下载到数据目录，不修改系统）。";
+                        color: Theme.warn;
+                        font-size: 12px;
+                        overflow: elide;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    if !AppState.tools-installing: GButton { label: "一键安装"; on: true; clicked => { AppState.install-tool(0); } }
+                    if AppState.tools-installing: Text { text: AppState.tools-status; color: Theme.text-secondary; font-size: 11px; vertical-alignment: center; overflow: elide; }
+                }
             }
 
             ListView {

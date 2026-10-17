@@ -48,6 +48,20 @@ Params / Headers / Body（无 / JSON / Form / Raw）/ Auth 四类编辑区；超
 
 自写递归下降解析器：错误带精确行列，识别尾逗号与单引号；格式化 / 压缩 / 排序 / 树形浏览 / 统计，编辑与格式化双视图。
 
+## 开箱即用
+
+应用按以下顺序解析外部工具（git / ssh / ssh-keygen），任一命中即可用，全部未命中才提示缺失：
+
+1. 环境变量 `DEVKIT_GIT` / `DEVKIT_SSH` / `DEVKIT_SSH_KEYGEN` 指定的可执行文件
+2. exe 同级 `tools\` 目录（随应用分发的便携版）：`tools\git\cmd\git.exe`（MinGit）、`tools\ssh\ssh.exe`（Win32-OpenSSH）
+3. 数据目录 `tools\`（应用内「一键安装」的下载位置）
+4. 系统 PATH
+
+- **一键安装**：设置 → 通用 → 运行工具，缺失时可直接从 GitHub 下载便携版 MinGit / Win32-OpenSSH 到数据目录，不写系统目录、不改 PATH；Git / SSH 工具页顶部也有缺失横幅入口
+- **发布打包**：仓库根目录 `package.ps1` 生成自包含 zip（devkit.exe + tools\），解压即用，无需系统安装 Git / OpenSSH
+- **无头检查**：`devkit.exe --check-tools` 打印三个工具的解析路径与可用性，用于排障
+- MinGit 为 GPLv2、Win32-OpenSSH 为 BSD 系许可，随包分发时保留上游许可声明（打包脚本会生成 THIRD-PARTY-NOTICES.txt）
+
 ## 构建与运行
 
 ```powershell
@@ -56,7 +70,7 @@ cargo run
 ```
 
 - 工具链：`stable-x86_64-pc-windows-gnu`（`.cargo/config.toml` 指定 w64devkit gcc 作为链接器，需安装到 `C:\devtools\w64devkit`）
-- 运行依赖：系统 `git` 在 PATH（缺失时启动检测引导）、Windows 10+ 自带 OpenSSH
+- 运行依赖：见上文「开箱即用」——内置便携版优先，缺失可一键安装或随发布包分发
 - 无 GPU 环境可设 `SLINT_BACKEND=winit-software` 使用软件渲染
 
 ## 仓库结构

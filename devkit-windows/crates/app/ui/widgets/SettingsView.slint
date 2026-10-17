@@ -122,6 +122,59 @@ export component SettingsView inherits Rectangle {
                     }
                 }
 
+                // 运行工具（git / OpenSSH）：内置便携版优先，缺失可一键安装到数据目录
+                Rectangle {
+                    height: 96px;
+                    border-radius: 8px;
+                    background: Theme.sidebar-bg;
+
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 4px;
+
+                        Text { text: "运行工具（随应用自带，缺失可一键安装到数据目录，不修改系统）"; color: Theme.text-secondary; font-size: 11px; }
+
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text {
+                                text: AppState.git-missing ? "Git：未检测到（Git 工具需要）" : "Git：\{AppState.git-path}";
+                                color: AppState.git-missing ? Theme.warn : Theme.text;
+                                font-size: 12px;
+                                overflow: elide;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+                            if AppState.git-missing && !AppState.tools-installing: GButton {
+                                label: "一键安装";
+                                clicked => { AppState.install-tool(0); }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text {
+                                text: AppState.ssh-missing ? "OpenSSH：未检测到（终端/SFTP 需要）" : "OpenSSH：\{AppState.ssh-path}";
+                                color: AppState.ssh-missing ? Theme.warn : Theme.text;
+                                font-size: 12px;
+                                overflow: elide;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+                            if AppState.ssh-missing && !AppState.tools-installing: GButton {
+                                label: "一键安装";
+                                clicked => { AppState.install-tool(1); }
+                            }
+                        }
+                    }
+                }
+
+                if AppState.tools-status != "": Text {
+                    text: AppState.tools-status;
+                    color: AppState.tools-installing ? Theme.accent : Theme.text-secondary;
+                    font-size: 11px;
+                    wrap: word-wrap;
+                }
+
                 Text {
                     text: AppState.settings-summary;
                     color: Theme.text-secondary;

@@ -1,7 +1,8 @@
-﻿// SSH 工具视图：连接横幅 + 终端 + 未连接时的会话记录选择面板 + 记录编辑器。
+// SSH 工具视图：连接横幅 + 终端 + 未连接时的会话记录选择面板 + 记录编辑器。
 import { ListView, LineEdit, ComboBox } from "std-widgets.slint";
 import { Theme } from "../globals/Theme.slint";
 import { SshUI, SshTreeNode } from "../globals/SshUI.slint";
+import { AppState } from "../globals/AppState.slint";
 import { TerminalView } from "TerminalView.slint";
 
 component SButton inherits Rectangle {
@@ -99,6 +100,31 @@ export component SshToolView inherits Rectangle {
                 SButton { label: "本地终端"; on: true; clicked => { SshUI.connect-local(); } }
                 SButton { label: "新建远程记录"; clicked => { SshUI.new-remote-record(); } }
                 SButton { label: "新建本地记录"; clicked => { SshUI.new-local-record(); } }
+            }
+
+            // 缺失 OpenSSH 时的一键安装横幅
+            if AppState.ssh-missing: Rectangle {
+                height: 46px;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: Theme.warn;
+
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    spacing: 8px;
+
+                    Text {
+                        text: "未检测到 OpenSSH，远程终端不可用（本地终端不受影响）。可一键安装便携版。";
+                        color: Theme.warn;
+                        font-size: 12px;
+                        overflow: elide;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    if !AppState.tools-installing: SButton { label: "一键安装"; on: true; clicked => { AppState.install-tool(1); } }
+                    if AppState.tools-installing: Text { text: AppState.tools-status; color: Theme.text-secondary; font-size: 11px; vertical-alignment: center; overflow: elide; }
+                }
             }
 
             ListView {

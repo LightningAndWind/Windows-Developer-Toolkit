@@ -6,3 +6,4 @@ pub mod json;
 pub mod sftp;
 pub mod ssh;
 pub mod terminal;
+pub mod toolchain;

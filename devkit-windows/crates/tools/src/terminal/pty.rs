@@ -30,7 +30,8 @@ impl PtySession {
         Self::spawn_command(&program, &args, rows, cols, cwd)
     }
 
-    /// 启动任意命令（SSH 子进程等）。
+    /// 启动任意命令（SSH 子进程等）。「ssh」经 toolchain 解析：
+    /// 内置便携版优先于系统 PATH（见 toolchain 模块）。
     pub fn spawn_command(
         program: &str,
         args: &[String],
@@ -38,6 +39,13 @@ impl PtySession {
         cols: u16,
         cwd: Option<&str>,
     ) -> Result<Self> {
+        let resolved;
+        let program = if program.eq_ignore_ascii_case("ssh") {
+            resolved = crate::toolchain::ssh();
+            resolved.as_str()
+        } else {
+            program
+        };
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })

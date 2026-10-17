@@ -9,6 +9,7 @@ use devkit_core::session::{SessionSnapshot, SessionStore, TabGroupSnapshot, TabS
 use devkit_core::tool::ids;
 use devkit_tools::json::tool::JsonTool;
 use devkit_tools::json::SortMode;
+use devkit_tools::toolchain::setup::{self, Tool};
 use slint::{ComponentHandle, Model, ModelRc, VecModel, Weak};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -311,6 +312,9 @@ pub fn run_app() -> Result<()> {
         }
     }
 
+    // 刷新外部运行工具状态（内置便携版 → PATH）
+    refresh_tool_status(&ui);
+
     // ---- 回调：外壳 ----
     {
         let ctx = ctx.clone();
@@ -534,6 +538,59 @@ pub fn run_app() -> Result<()> {
             state.set_settings_visible(true);
             state.set_settings_tab(0);
             populate_settings(&ctx, &ui, 0);
+            refresh_tool_status(&ui);
+        });
+    }
+    {
+        // 一键安装运行工具（0=git 1=ssh）：后台线程下载解压，进度经事件循环回 UI
+        let ui = ui.as_weak();
+        state.on_install_tool(move |which| {
+            let Some(w) = ui.upgrade() else { return };
+            {
+                let state = w.global::<AppState>();
+                if state.get_tools_installing() {
+                    return;
+                }
+                state.set_tools_installing(true);
+                state.set_tools_status(
+                    (if which == 1 { "正在获取 OpenSSH 下载地址…" } else { "正在获取 Git 下载地址…" }).into(),
+                );
+            }
+            let ui2 = ui.clone();
+            std::thread::Builder::new()
+                .name("tool-setup".into())
+                .spawn(move || {
+                    let tool = if which == 1 { Tool::Ssh } else { Tool::Git };
+                    let label: &str = if which == 1 { "OpenSSH" } else { "Git" };
+                    let ui3 = ui2.clone();
+                    let progress = move |pct: u8| {
+                        let ui4 = ui3.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = ui4.upgrade() {
+                                w.global::<AppState>()
+                                    .set_tools_status(format!("{label} 下载中 {pct}%…").into());
+                            }
+                        });
+                    };
+                    let result = setup::install(tool, &progress);
+                    let _ = slint::invoke_from_event_loop(move || {
+                        let Some(w) = ui2.upgrade() else { return };
+                        let state = w.global::<AppState>();
+                        state.set_tools_installing(false);
+                        match result {
+                            Ok(dir) => {
+                                state.set_tools_status(
+                                    format!("{label} 已就绪（{}）", dir.display()).into(),
+                                );
+                                refresh_tool_status(&w);
+                            }
+                            Err(e) => {
+                                state.set_tools_status(format!("{label} 安装失败：{e:#}").into());
+                            }
+                        }
+                    });
+                })
+                .ok();
         });
     }
     {
@@ -843,7 +900,18 @@ fn init_data_dir(ui: &MainWindow, ctx: &Rc<Ctx>, dir: &str) -> Result<()> {
     let db = Database::open(&std::path::Path::new(dir).join("devkit.sqlite3"))?;
     *ctx.db.borrow_mut() = Some(db);
     restore_session(ui, ctx);
+    // 数据目录变化会影响 tools 解析（应用内安装位置）
+    refresh_tool_status(ui);
     Ok(())
+}
+
+/// 刷新外部运行工具（git / OpenSSH）状态：设置页展示 + 工具页缺失横幅。
+fn refresh_tool_status(ui: &MainWindow) {
+    let state = ui.global::<AppState>();
+    state.set_git_missing(!devkit_tools::toolchain::git_available());
+    state.set_ssh_missing(!devkit_tools::toolchain::ssh_available());
+    state.set_git_path(devkit_tools::toolchain::git_path().unwrap_or_default().into());
+    state.set_ssh_path(devkit_tools::toolchain::ssh_path().unwrap_or_default().into());
 }
 
 /// 选择标签：加载目标状态到全局镜像。

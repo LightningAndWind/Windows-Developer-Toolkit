@@ -80,6 +80,14 @@ export global AppState {
     in-out property <bool> prevent-sleep: false;
     in-out property <int> appearance-mode: 0; // 0=跟随系统 1=浅色 2=深色
 
+    // 运行工具（git / OpenSSH）状态与一键安装
+    in-out property <bool> git-missing: false;
+    in-out property <string> git-path;
+    in-out property <bool> ssh-missing: false;
+    in-out property <string> ssh-path;
+    in-out property <bool> tools-installing: false;
+    in-out property <string> tools-status;
+
     callback new-tab(string);
     callback select-tab(string);
     callback close-tab(string);
@@ -112,4 +120,6 @@ export global AppState {
     callback close-group-picker();
     callback move-tab-to-group(string);   // 参数 = 目标分组 id（"" = 未分组）
     callback new-group-for-picker();
+    // 运行工具一键安装（0=git 1=ssh）
+    callback install-tool(int);
 }

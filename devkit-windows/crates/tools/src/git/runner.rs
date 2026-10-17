@@ -1,4 +1,4 @@
-//! Git 命令执行器：系统 git 子进程 + GIT_SSH_COMMAND 密钥注入。
+//! Git 命令执行器：git 子进程（内置便携版优先，见 toolchain 模块）+ GIT_SSH_COMMAND 密钥注入。
 
 use super::types::{BranchRow, ChangeEntry, CommitRow, DiffLine, DiffLineKind, RepoStatus, StashRow};
 use anyhow::{anyhow, Result};
@@ -20,7 +20,7 @@ impl GitRunner {
 
     /// 同步执行 git 子命令，返回 stdout。
     pub fn run(&self, args: &[&str], ssh: bool) -> Result<String> {
-        let mut cmd = Command::new("git");
+        let mut cmd = Command::new(crate::toolchain::git());
         cmd.current_dir(&self.path).args(args);
         cmd.env("GIT_OPTIONAL_LOCKS", "0");
         cmd.env("core.quotepath", "false");
@@ -29,12 +29,15 @@ impl GitRunner {
                 let key_str = key.to_string_lossy().to_string();
                 cmd.env(
                     "GIT_SSH_COMMAND",
-                    format!("ssh -i \"{key_str}\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"),
+                    format!(
+                        "\"{}\" -i \"{key_str}\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new",
+                        crate::toolchain::ssh()
+                    ),
                 );
             }
         }
         let out = cmd.output().map_err(|e| {
-            anyhow!("git 执行失败（确认已安装 Git 并加入 PATH）：{e}")
+            anyhow!("git 执行失败：{e}（未检测到 Git？可在 设置→通用 一键安装便携版）")
         })?;
         if !out.status.success() {
             let err = String::from_utf8_lossy(&out.stderr);
@@ -471,7 +474,7 @@ pub fn ssh_keygen(
     let file = keys_dir.join(key_id.to_string());
     // 已存在则先删
     let _ = std::fs::remove_file(&file);
-    let mut cmd = Command::new("ssh-keygen");
+    let mut cmd = Command::new(crate::toolchain::ssh_keygen());
     cmd.arg("-t");
     cmd.arg(if algorithm.eq_ignore_ascii_case("rsa") { "rsa" } else { "ed25519" });
     if algorithm.eq_ignore_ascii_case("rsa") {
@@ -481,13 +484,13 @@ pub fn ssh_keygen(
     cmd.arg("-N").arg(passphrase.unwrap_or(""));
     cmd.arg("-C").arg(comment.unwrap_or("devkit"));
     cmd.arg("-q");
-    let out = cmd.output().map_err(|e| anyhow!("ssh-keygen 启动失败（确认 OpenSSH 已安装）：{e}"))?;
+    let out = cmd.output().map_err(|e| anyhow!("ssh-keygen 启动失败：{e}（未检测到 OpenSSH？可在 设置→通用 一键安装便携版）"))?;
     if !out.status.success() {
         anyhow::bail!("ssh-keygen 失败：{}", String::from_utf8_lossy(&out.stderr));
     }
     let public_key = std::fs::read_to_string(keys_dir.join(format!("{}.pub", key_id)))?;
     let _ = std::fs::remove_file(keys_dir.join(format!("{}.pub", key_id)));
-    let fp = Command::new("ssh-keygen")
+    let fp = Command::new(crate::toolchain::ssh_keygen())
         .arg("-lf")
         .arg(&file)
         .output()
@@ -497,22 +500,18 @@ pub fn ssh_keygen(
     Ok(GeneratedKey { public_key: public_key.trim().to_string(), private_path: file, fingerprint: fp })
 }
 
-/// git 是否可用。
+/// git 是否可用（内置便携版 → PATH，见 toolchain）。
 pub fn git_available() -> bool {
-    Command::new("git")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    crate::toolchain::git_available()
 }
 
 /// 克隆仓库（实时输出经回调推送）。
 pub fn clone(url: &str, parent_dir: &Path, key: Option<&Path>, on_line: impl Fn(&str)) -> Result<PathBuf> {
-    let mut cmd = Command::new("git");
+    let mut cmd = Command::new(crate::toolchain::git());
     cmd.arg("clone").arg(url).current_dir(parent_dir);
     if let Some(k) = key {
         let k_str = k.to_string_lossy().to_string();
-        cmd.env("GIT_SSH_COMMAND", format!("ssh -i \"{k_str}\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"));
+        cmd.env("GIT_SSH_COMMAND", format!("\"{}\" -i \"{k_str}\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new", crate::toolchain::ssh()));
     }
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());

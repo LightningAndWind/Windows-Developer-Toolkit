@@ -130,7 +130,7 @@ export component GitToolView inherits Rectangle {
                     HorizontalLayout {
                         padding-left: 8px + n.depth * 18px;
                         spacing: 8px;
-                        Text { width: 18px; text: n.is-folder ? "📁" : "🌿"; vertical-alignment: center; }
+                        Text { width: 18px; text: n.is-folder ? "📁" : "🌿"; font-family: "Segoe UI Symbol"; vertical-alignment: center; }
                         VerticalLayout {
                             horizontal-stretch: 1;
                             alignment: center;
@@ -138,7 +138,7 @@ export component GitToolView inherits Rectangle {
                         }
                         Rectangle {
                             width: 26px;
-                            Text { text: "✕"; color: Theme.danger; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: "✕"; color: Theme.danger; font-size: 12px; font-family: "Segoe UI Symbol"; horizontal-alignment: center; vertical-alignment: center; }
                             TouchArea { clicked => { GitUI.repo-deleted(index); } }
                         }
                     }
@@ -162,7 +162,7 @@ export component GitToolView inherits Rectangle {
                         spacing: 8px;
                         Text { text: GitUI.banner-branch; color: Theme.text; font-family: "Consolas"; font-size: 13px; font-weight: 700; vertical-alignment: center; }
                         Text { text: "↑\{GitUI.ahead} ↓\{GitUI.behind}"; color: Theme.text-secondary; font-size: 11px; vertical-alignment: center; }
-                        if GitUI.conflict-count > 0: Text { text: "⚠ 冲突 \{GitUI.conflict-count}"; color: Theme.warn; font-size: 12px; font-weight: 700; vertical-alignment: center; }
+                        if GitUI.conflict-count > 0: Text { text: "⚠ 冲突 \{GitUI.conflict-count}"; color: Theme.warn; font-size: 12px; font-weight: 700; font-family: "Segoe UI Symbol"; vertical-alignment: center; }
                         if GitUI.rebasing: Text { text: "变基中"; color: Theme.warn; font-size: 12px; vertical-alignment: center; }
                         Rectangle { horizontal-stretch: 1; }
                         GButton { label: "刷新"; clicked => { GitUI.refresh-all(); } }
@@ -282,7 +282,7 @@ export component GitToolView inherits Rectangle {
                                             HorizontalLayout {
                                                 padding-left: 8px;
                                                 spacing: 4px;
-                                                Text { text: b.current ? "●" : (b.remote ? "⇄" : "○"); width: 14px; color: b.current ? Theme.ok : Theme.text-secondary; font-size: 10px; vertical-alignment: center; }
+                                                Text { text: b.current ? "●" : (b.remote ? "⇄" : "○"); width: 14px; color: b.current ? Theme.ok : Theme.text-secondary; font-size: 10px; font-family: "Segoe UI Symbol"; vertical-alignment: center; }
                                                 Text { text: b.name; color: Theme.text; font-size: 11px; overflow: elide; vertical-alignment: center; horizontal-stretch: 1; }
                                                 GButton { label: "并"; width: 22px; clicked => { GitUI.merge-branch(index); } }
                                                 GButton { label: "删"; width: 22px; danger: true; clicked => { GitUI.branch-delete(index, false); } }

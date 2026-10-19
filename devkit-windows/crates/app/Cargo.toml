@@ -11,7 +11,7 @@ path = "src/main.rs"
 slint-build = "1.13"
 
 [dependencies]
-slint = { version = "1.13", default-features = false, features = ["std", "backend-winit", "renderer-femtovg", "accessibility", "compat-1-18"] }
+slint = { version = "1.13", default-features = false, features = ["std", "backend-winit", "renderer-femtovg", "renderer-software", "accessibility", "compat-1-18"] }
 devkit-core = { path = "../core" }
 devkit-tools = { path = "../tools" }
 tokio.workspace = true

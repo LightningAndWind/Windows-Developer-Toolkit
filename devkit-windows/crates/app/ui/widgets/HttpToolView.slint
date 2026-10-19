@@ -74,6 +74,19 @@ component KvTable inherits Rectangle {
             }
         }
 
+        // 添加行按钮：紧贴表头（靠上，对齐 macOS 端布局）
+        Rectangle {
+            height: 30px;
+            HorizontalLayout {
+                padding-left: 8px;
+                alignment: start;
+                HButton {
+                    label: "＋ 添加行";
+                    clicked => { HttpUI.kv-added(root.table-index); }
+                }
+            }
+        }
+
         ListView {
             for kv[index] in root.rows: Rectangle {
                 height: 30px;
@@ -203,9 +216,10 @@ export component HttpToolView inherits Rectangle {
         VerticalLayout {
             spacing: 0;
 
-            // 请求编辑器
+            // 请求编辑器：固定占分栏一半（对齐 macOS 端默认 0.5 比例），
+            // 不随分区内容伸缩，避免切到 Body=无 时响应区突然上移。
             Rectangle {
-                vertical-stretch: 1;
+                height: 50%;
 
                 VerticalLayout {
                     // 分区切换
@@ -431,22 +445,6 @@ export component HttpToolView inherits Rectangle {
                         }
                     }
 
-                    // 表格添加行按钮（参数/头/表单）
-                    if HttpUI.editor-tab < 2 || (HttpUI.editor-tab == 2 && HttpUI.body-kind == 2): Rectangle {
-                        height: 30px;
-                        HorizontalLayout {
-                            padding-left: 8px;
-                            alignment: start;
-                            HButton {
-                                label: "＋ 添加行";
-                                clicked => {
-                                    if (HttpUI.editor-tab == 0) { HttpUI.kv-added(0); }
-                                    if (HttpUI.editor-tab == 1) { HttpUI.kv-added(1); }
-                                    if (HttpUI.editor-tab == 2) { HttpUI.kv-added(2); }
-                                }
-                            }
-                        }
-                    }
                 }
             }
 
@@ -491,6 +489,7 @@ export component HttpToolView inherits Rectangle {
                                 text: "⚠ 超过 10MB 已截断";
                                 color: Theme.warn;
                                 font-size: 11px;
+                                font-family: "Segoe UI Symbol";
                                 vertical-alignment: center;
                             }
                             Rectangle { horizontal-stretch: 1; }

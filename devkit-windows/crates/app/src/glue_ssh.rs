@@ -530,6 +530,10 @@ pub fn feed_tab(ctx: &Rc<Ctx>, tab_id: &str) {
     if should_pulse {
         if let Some(ui) = current_window() {
             let tv = ui.global::<TermHostUI>();
+            let sb = ACTIVE_FRAME.with(|c| {
+                c.borrow().as_ref().map(|f| f.sb_rows()).unwrap_or(0)
+            });
+            tv.set_sb_rows(sb as i32);
             let pulse = tv.get_pulse();
             tv.set_pulse(pulse + 1);
         }
@@ -561,6 +565,7 @@ pub fn attach_active_terminal(ctx: &Rc<Ctx>, ui: &crate::MainWindow) {
             frame.sync(&run.session.grid);
         }
     }
+    tv.set_sb_rows(frame.sb_rows() as i32);
     ACTIVE_FRAME.with(|c| *c.borrow_mut() = Some(frame));
     let pulse = tv.get_pulse();
     tv.set_pulse(pulse + 1);

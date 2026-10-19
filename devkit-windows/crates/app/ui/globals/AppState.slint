@@ -70,6 +70,22 @@ export global AppState {
     in-out property <bool> group-picker-visible;
     in-out property <string> group-picker-tab;   // 待移动的标签 id
 
+    // 标签右键菜单
+    in-out property <bool> tab-context-visible;
+    in-out property <string> tab-context-tab;
+    in-out property <length> context-x;
+    in-out property <length> context-y;
+
+    // 标签拖拽（拖到分组头上完成移动）
+    in-out property <bool> drag-active;
+    in-out property <string> drag-tab-id;
+    in-out property <string> drag-tab-title;
+    in-out property <string> drag-tab-icon;
+    in-out property <length> drag-x;
+    in-out property <length> drag-y;
+    in-out property <string> drag-hover-group;   // 由分组头行在拖拽悬停时写入
+    callback tab-dropped();
+
     // Launcher 搜索过滤后的工具卡片（按分类分组，由 Rust 侧过滤）
     in-out property <[LauncherTool]> tools-network;
     in-out property <[LauncherTool]> tools-terminal;

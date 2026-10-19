@@ -1,3 +1,6 @@
+// 发布版无控制台窗口（调试构建保留控制台便于排障）
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 fn main() {
     // 无头检查外部运行工具解析结果（排障 / 脚本用）：devkit --check-tools
     if std::env::args().any(|a| a == "--check-tools") {

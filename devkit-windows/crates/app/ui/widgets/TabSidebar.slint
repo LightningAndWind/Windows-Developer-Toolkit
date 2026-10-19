@@ -13,8 +13,56 @@ component TabRow inherits Rectangle {
     background: active ? Theme.active : (ta.has-hover ? Theme.hover : transparent);
 
     ta := TouchArea {
-        clicked => { AppState.select-tab(data.id); }
+        property <PointerEventButton> down-btn: PointerEventButton.left;
+        property <length> press-x;
+        property <length> press-y;
+
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                down-btn = e.button;
+                press-x = self.mouse-x;
+                press-y = self.mouse-y;
+            }
+            // 右键：打开标签菜单
+            if (e.kind == PointerEventKind.up && e.button == PointerEventButton.right) {
+                AppState.context-x = self.absolute-position.x + self.mouse-x;
+                AppState.context-y = self.absolute-position.y + self.mouse-y;
+                AppState.tab-context-tab = data.id;
+                AppState.tab-context-visible = true;
+            }
+            // 左键释放：若在拖拽中则执行落放
+            if (e.kind == PointerEventKind.up && e.button == PointerEventButton.left) {
+                if (AppState.drag-active && AppState.drag-tab-id == data.id) {
+                    AppState.tab-dropped();
+                }
+            }
+            if (e.kind == PointerEventKind.cancel) {
+                AppState.drag-active = false;
+                AppState.drag-hover-group = "";
+            }
+        }
+        clicked => {
+            // 拖拽结束的释放也满足 clicked，仅响应左键普通点击
+            if (down-btn == PointerEventButton.left) {
+                AppState.select-tab(data.id);
+            }
+        }
         double-clicked => { AppState.rename-requested(data.id); }
+        moved => {
+            // 超过点击容差即进入拖拽
+            if (!AppState.drag-active && self.pressed
+                && (Math.abs(self.mouse-x - press-x) > 6px || Math.abs(self.mouse-y - press-y) > 6px)) {
+                AppState.drag-active = true;
+                AppState.drag-tab-id = data.id;
+                AppState.drag-tab-title = data.title;
+                AppState.drag-tab-icon = data.icon;
+                AppState.drag-hover-group = "";
+            }
+            if (AppState.drag-active && AppState.drag-tab-id == data.id) {
+                AppState.drag-x = self.absolute-position.x + self.mouse-x;
+                AppState.drag-y = self.absolute-position.y + self.mouse-y;
+            }
+        }
     }
 
     HorizontalLayout {
@@ -25,6 +73,7 @@ component TabRow inherits Rectangle {
         Text {
             text: data.icon;
             width: 18px;
+            font-family: "Segoe UI Symbol";
             vertical-alignment: center;
         }
 
@@ -61,6 +110,7 @@ component TabRow inherits Rectangle {
             Text {
                 text: "⋯";
                 font-size: 11px;
+                font-family: "Segoe UI Symbol";
                 color: Theme.text-secondary;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -82,6 +132,7 @@ component TabRow inherits Rectangle {
             Text {
                 text: "✕";
                 font-size: 10px;
+                font-family: "Segoe UI Symbol";
                 color: Theme.text-secondary;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -93,9 +144,25 @@ component TabRow inherits Rectangle {
 component GroupHeader inherits Rectangle {
     in property <SidebarRow> data;
 
+    // 拖拽命中检测：光标纵向落在本行即为目标分组（侧栏占满左列，命中只按 y 判定）
+    property <bool> drop-hl: AppState.drag-active
+        && AppState.drag-y >= self.absolute-position.y
+        && AppState.drag-y < self.absolute-position.y + self.height;
+
     height: 28px;
     border-radius: 6px;
-    background: ta.has-hover ? Theme.hover : transparent;
+    border-width: drop-hl ? 1px : 0px;
+    border-color: Theme.accent;
+    background: drop-hl ? Theme.accent-soft : (ta.has-hover ? Theme.hover : transparent);
+
+    // 只有一个分组头在任一时刻为 true；离开时若仍是自己记录的目标则清空
+    changed drop-hl => {
+        if (self.drop-hl) {
+            AppState.drag-hover-group = data.group-id;
+        } else if (AppState.drag-hover-group == data.group-id) {
+            AppState.drag-hover-group = "";
+        }
+    }
 
     ta := TouchArea {
         clicked => { AppState.toggle-group(data.group-id); }
@@ -111,6 +178,7 @@ component GroupHeader inherits Rectangle {
             text: data.collapsed ? "▸" : "▾";
             color: Theme.text-secondary;
             font-size: 10px;
+            font-family: "Segoe UI Symbol";
             vertical-alignment: center;
         }
 
@@ -154,6 +222,7 @@ component GroupHeader inherits Rectangle {
             Text {
                 text: "✕";
                 font-size: 9px;
+                font-family: "Segoe UI Symbol";
                 color: del-ta.has-hover ? #ffffff : Theme.text-secondary;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -179,6 +248,7 @@ component FooterButton inherits Rectangle {
     Text {
         text: root.icon;
         font-size: 15px;
+        font-family: "Segoe UI Symbol";
         horizontal-alignment: center;
         vertical-alignment: center;
     }
@@ -198,8 +268,10 @@ export component TabSidebar inherits Rectangle {
                 x: 6px;
                 width: parent.width - 12px;
 
+                // 委托必须显式高度：否则 Flickable 的 content-height 为 0，滚动定位错乱
                 for row in AppState.sidebar-rows: Rectangle {
                     width: parent.width;
+                    height: row.kind == 0 ? 28px : 36px;
 
                     if row.kind == 0: GroupHeader { data: row; }
                     if row.kind == 1: TabRow {
@@ -265,6 +337,7 @@ export component TabSidebar inherits Rectangle {
                             text: "▦";
                             color: Theme.text-secondary;
                             font-size: 12px;
+                            font-family: "Segoe UI Symbol";
                             vertical-alignment: center;
                         }
                         Text {

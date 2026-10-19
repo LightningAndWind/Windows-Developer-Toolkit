@@ -31,7 +31,10 @@ export component SshToolView inherits Rectangle {
     tv := TerminalView {
         visible: SshUI.state-kind == 2;
         width: parent.width;
-        height: parent.height;
+        // 连接横幅悬浮会盖住终端首行：已连接时把终端整体下移 30px，
+        // 并让行数按可视高度重算（changed height → geometry-changed → PTY resize）。
+        y: SshUI.connected ? 30px : 0px;
+        height: parent.height - (SshUI.connected ? 30px : 0px);
         term-bg: #18181b;
     }
 
@@ -147,6 +150,7 @@ export component SshToolView inherits Rectangle {
                             width: 16px;
                             text: n.expanded ? "▾" : "▸";
                             color: Theme.text-secondary;
+                            font-family: "Segoe UI Symbol";
                             visible: n.has-children || n.is-folder;
                             vertical-alignment: center;
                         }
@@ -154,6 +158,7 @@ export component SshToolView inherits Rectangle {
                         Text {
                             width: 20px;
                             text: n.is-folder ? "📁" : (n.is-local ? "💻" : "🖥");
+                            font-family: "Segoe UI Symbol";
                             vertical-alignment: center;
                         }
 
@@ -179,12 +184,12 @@ export component SshToolView inherits Rectangle {
 
                         Rectangle {
                             width: 26px;
-                            Text { text: "✎"; color: Theme.text-secondary; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: "✎"; color: Theme.text-secondary; font-size: 13px; font-family: "Segoe UI Symbol"; horizontal-alignment: center; vertical-alignment: center; }
                             TouchArea { clicked => { SshUI.edit-record(index); } }
                         }
                         Rectangle {
                             width: 26px;
-                            Text { text: "✕"; color: Theme.danger; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: "✕"; color: Theme.danger; font-size: 12px; font-family: "Segoe UI Symbol"; horizontal-alignment: center; vertical-alignment: center; }
                             TouchArea { clicked => { SshUI.tree-deleted(index); } }
                         }
                     }

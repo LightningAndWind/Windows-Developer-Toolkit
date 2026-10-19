@@ -129,6 +129,28 @@ fn close_tab_impl(ui: &MainWindow, ctx: &Rc<Ctx>, id: &str) {
     rebuild_sidebar(ctx, ui);
 }
 
+/// 把标签移入指定分组（gid 为空 = 移出分组）。分组选择器与拖拽落放共用。
+fn move_tab_to_group_impl(ui: &MainWindow, ctx: &Rc<Ctx>, tab_id: &str, gid: &str) {
+    let new_gid = if gid.is_empty() { None } else { uuid::Uuid::parse_str(gid).ok() };
+    if let Ok(mut tabs) = ctx.tabs.try_borrow_mut() {
+        if let Some(e) = tabs.iter_mut().find(|e| e.id.to_string() == tab_id) {
+            e.group_id = new_gid;
+        }
+    }
+    let model = tabs_model_handle();
+    for i in 0..model.row_count() {
+        if let Some(mut t) = model.row_data(i) {
+            if t.id.as_str() == tab_id {
+                t.group_id = gid.to_string().into();
+                model.set_row_data(i, t);
+                break;
+            }
+        }
+    }
+    rebuild_sidebar(ctx, ui);
+    save_session(ctx);
+}
+
 /// 填充设置面板数据（tab：0 通用 / 1 HTTP 历史 / 2 终端会话 / 3 Git 仓库）。
 fn populate_settings(ctx: &Rc<Ctx>, ui: &MainWindow, tab: i32) {
     let state = ui.global::<AppState>();
@@ -321,6 +343,16 @@ pub fn run_app() -> Result<()> {
         let ui = ui.as_weak();
         state.on_new_tab(move |tool_id| {
             let Some(ui) = ui.upgrade() else { return };
+            let state = ui.global::<AppState>();
+            // 空 tool_id = 侧栏「新标签」/Ctrl+T：回到 Launcher（对齐 macOS ⌘T）
+            if tool_id.is_empty() {
+                state.set_launcher_visible(true);
+                state.set_active_id("".into());
+                state.set_active_tool_id("".into());
+                *ctx.active.borrow_mut() = String::new();
+                save_session(&ctx);
+                return;
+            }
             let Some(desc) = crate::registry::find(&tool_id) else { return };
             let model = tabs_model_handle();
             // 单实例工具：已打开则直接选中
@@ -738,25 +770,25 @@ pub fn run_app() -> Result<()> {
             let Some(ui) = ui.upgrade() else { return };
             let state = ui.global::<AppState>();
             let tab_id = state.get_group_picker_tab().to_string();
-            let new_gid = if gid.is_empty() { None } else { uuid::Uuid::parse_str(&gid).ok() };
-            if let Ok(mut tabs) = ctx.tabs.try_borrow_mut() {
-                if let Some(e) = tabs.iter_mut().find(|e| e.id.to_string() == tab_id) {
-                    e.group_id = new_gid;
-                }
-            }
-            let model = tabs_model_handle();
-            for i in 0..model.row_count() {
-                if let Some(mut t) = model.row_data(i) {
-                    if t.id.as_str() == tab_id.as_str() {
-                        t.group_id = gid.clone();
-                        model.set_row_data(i, t);
-                        break;
-                    }
-                }
-            }
+            move_tab_to_group_impl(&ui, &ctx, &tab_id, &gid);
             state.set_group_picker_visible(false);
-            rebuild_sidebar(&ctx, &ui);
-            save_session(&ctx);
+        });
+    }
+    {
+        // 标签拖拽落放：落点分组由分组头行在悬停时写入 drag-hover-group
+        let ctx = ctx.clone();
+        let ui = ui.as_weak();
+        state.on_tab_dropped(move || {
+            let Some(ui) = ui.upgrade() else { return };
+            let state = ui.global::<AppState>();
+            let tab_id = state.get_drag_tab_id().to_string();
+            let gid = state.get_drag_hover_group().to_string();
+            state.set_drag_active(false);
+            state.set_drag_hover_group("".into());
+            state.set_drag_tab_id("".into());
+            if !gid.is_empty() && !tab_id.is_empty() {
+                move_tab_to_group_impl(&ui, &ctx, &tab_id, &gid);
+            }
         });
     }
     {
@@ -881,6 +913,9 @@ pub fn run_app() -> Result<()> {
     crate::glue_sftp::wire_sftp_callbacks(ctx.clone());
     // ---- 回调：Git 工具 ----
     crate::glue_git::wire_git_callbacks(ctx.clone());
+
+    // 首屏工具卡片：启动即填充（此后仅在搜索时由 on_launcher_search 刷新）
+    refresh_launcher(&state, "");
 
     // ---- 运行 ----
     let result = ui.run();

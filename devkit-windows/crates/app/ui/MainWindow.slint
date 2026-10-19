@@ -17,6 +17,29 @@ import { TermLine, TermSpan, TermHostUI } from "widgets/TerminalView.slint";
 import { LineEdit } from "std-widgets.slint";
 import { ListView } from "std-widgets.slint";
 
+// 右键菜单项
+component ContextItem inherits Rectangle {
+    in property <string> label;
+    in property <bool> danger;
+    callback clicked;
+
+    height: 30px;
+    border-radius: 5px;
+    background: ta.has-hover ? Theme.hover : transparent;
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    Text {
+        x: 10px;
+        text: root.label;
+        color: root.danger ? Theme.danger : Theme.text;
+        font-size: 12px;
+        vertical-alignment: center;
+    }
+}
+
 export { AppState, Theme }
 export { TabItemData, LauncherTool, SettingsRow, TabGroupData, SidebarRow } from "globals/AppState.slint";
 export { JsonUI, JsonTreeNode } from "globals/JsonUI.slint";
@@ -28,6 +51,7 @@ export { TermLine, TermSpan, TermHostUI } from "widgets/TerminalView.slint";
 
 export component MainWindow inherits Window {
     title: "devkit";
+    icon: @image-url("../assets/devkit-icon.png");
     width: 1200px;
     height: 800px;
     background: Theme.bg;
@@ -149,6 +173,86 @@ export component MainWindow inherits Window {
                         text: "该工具视图开发中（里程碑推进接入）";
                         color: Theme.text-secondary;
                         horizontal-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
+    // ===== 标签拖拽浮标（跟随光标）=====
+    if AppState.drag-active: Rectangle {
+        x: min(AppState.drag-x + 12px, root.width - 176px);
+        y: min(max(AppState.drag-y - 14px, 0px), root.height - 32px);
+        width: 168px;
+        height: 28px;
+        border-radius: 7px;
+        background: Theme.content-bg;
+        border-width: 1px;
+        border-color: Theme.accent;
+        opacity: 0.92;
+
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 8px;
+            spacing: 6px;
+            alignment: start;
+
+            Text {
+                text: AppState.drag-tab-icon;
+                width: 16px;
+                font-family: "Segoe UI Symbol";
+                vertical-alignment: center;
+            }
+            Text {
+                text: AppState.drag-tab-title;
+                color: Theme.text;
+                font-size: 12px;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    // ===== 标签右键菜单 =====
+    if AppState.tab-context-visible: Rectangle {
+        TouchArea {
+            clicked => { AppState.tab-context-visible = false; }
+        }
+
+        Rectangle {
+            x: min(AppState.context-x + 2px, root.width - 172px);
+            y: min(AppState.context-y + 2px, root.height - 116px);
+            width: 164px;
+            height: 106px;
+            border-radius: 8px;
+            background: Theme.content-bg;
+            border-width: 1px;
+            border-color: Theme.divider;
+
+            VerticalLayout {
+                padding: 5px;
+                spacing: 2px;
+
+                ContextItem {
+                    label: "重命名";
+                    clicked => {
+                        AppState.tab-context-visible = false;
+                        AppState.rename-requested(AppState.tab-context-tab);
+                    }
+                }
+                ContextItem {
+                    label: "移动到分组…";
+                    clicked => {
+                        AppState.tab-context-visible = false;
+                        AppState.open-group-picker(AppState.tab-context-tab);
+                    }
+                }
+                ContextItem {
+                    label: "关闭标签";
+                    danger: true;
+                    clicked => {
+                        AppState.tab-context-visible = false;
+                        AppState.close-tab(AppState.tab-context-tab);
                     }
                 }
             }

@@ -102,9 +102,13 @@ impl TermGrid {
             return;
         }
         let mut new_cells = vec![Cell::default(); cols * rows];
-        for r in 0..rows.min(self.rows) {
-            for c in 0..cols.min(self.cols) {
-                new_cells[r * cols + c] = self.cells[r * self.cols + c];
+        // 构造期 cells 尚未分配（cols/rows 的 1 只是占位，实际尺寸由本次 resize 落定），
+        // 无旧内容可保留，直接跳过拷贝；否则会按旧尺寸索引空 Vec 越界 panic。
+        if !self.cells.is_empty() {
+            for r in 0..rows.min(self.rows) {
+                for c in 0..cols.min(self.cols) {
+                    new_cells[r * cols + c] = self.cells[r * self.cols + c];
+                }
             }
         }
         self.cols = cols;
@@ -646,5 +650,44 @@ fn parse_color_ext(g: &mut TermGrid, p: &[u16], fg: bool) -> usize {
             }
         }
         _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::terminal::TerminalSession;
+
+    /// 回归：TermGrid::new 经 resize 从空 cells 拷贝，不得越界（修复前必 panic）。
+    #[test]
+    fn new_allocates_grid_without_panic() {
+        let g = TermGrid::new(100, 30);
+        assert_eq!((g.cols, g.rows), (100, 30));
+        assert_eq!(g.cells.len(), 100 * 30);
+        assert_eq!(g.row_view(0).len(), 100);
+    }
+
+    /// resize 保留旧内容（放大 / 缩小两个方向），且空网格 resize 安全。
+    #[test]
+    fn resize_preserves_content() {
+        let mut g = TermGrid::new(10, 4);
+        g.cursor_to(1, 0);
+        g.put_char('A');
+        g.resize(20, 6);
+        assert_eq!((g.cols, g.rows), (20, 6));
+        assert_eq!(g.row_view(1)[0].ch, 'A');
+        g.resize(5, 3);
+        assert_eq!((g.cols, g.rows), (5, 3));
+        assert_eq!(g.row_view(1)[0].ch, 'A');
+    }
+
+    /// 会话级冒烟：解析并渲染一段带 CR/LF 的文本。
+    #[test]
+    fn session_feed_smoke() {
+        let mut s = TerminalSession::new(80, 24);
+        s.feed(b"hello\r\nworld");
+        assert_eq!(s.grid.row_view(0)[0].ch, 'h');
+        assert_eq!(s.grid.row_view(1)[0].ch, 'w');
+        assert_eq!((s.grid.cursor_row, s.grid.cursor_col), (1, 5));
     }
 }

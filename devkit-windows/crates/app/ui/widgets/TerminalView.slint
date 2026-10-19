@@ -19,6 +19,8 @@ export struct TermLine {
 export global TermHostUI {
     in-out property <[TermLine]> lines;
     in-out property <int> pulse;
+    /// 模型中 scrollback 行数；>0 时 pulse 才贴底滚动，否则置顶（避免把屏幕首行顶出视口）。
+    in-out property <int> sb-rows;
     in-out property <float> cols-f: 80.0;
     in-out property <float> rows-f: 24.0;
     in-out property <color> term-bg: #18181b;
@@ -72,6 +74,10 @@ export component TerminalView inherits Rectangle {
                         background: sp.fg;
                     }
                 }
+
+                // 行尾填充：span 均为 stretch 0，若无元素吸收剩余宽度，
+                // 布局会把空间平分给各 span，把光标格（反色背景）拉宽成色条。
+                Rectangle { horizontal-stretch: 1; background: transparent; }
             }
         }
     }
@@ -94,7 +100,13 @@ export component TerminalView inherits Rectangle {
     }
 
     changed pulse => {
-        lv.content-y = Math.min(0, lv.height - lv.content-height);
+        // 无 scrollback 时屏幕行必然放得下（rows-f 按 floor 计算），置顶显示；
+        // 有 scrollback 时跟随输出贴底。无脑贴底会把唯一有内容的屏幕首行推出视口（黑屏根因）。
+        if (TermHostUI.sb-rows > 0) {
+            lv.content-y = Math.min(0, lv.height - lv.content-height);
+        } else {
+            lv.content-y = 0;
+        }
     }
 
     changed width => {

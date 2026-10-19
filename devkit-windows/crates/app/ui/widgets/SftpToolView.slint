@@ -101,11 +101,13 @@ component Panel inherits Rectangle {
                         width: 18px;
                         text: r.selected ? "☑" : "☐";
                         color: r.selected ? Theme.accent : Theme.text-secondary;
+                        font-family: "Segoe UI Symbol";
                         vertical-alignment: center;
                     }
                     Text {
                         width: 18px;
                         text: r.is-dir ? "📁" : "📄";
+                        font-family: "Segoe UI Symbol";
                         vertical-alignment: center;
                     }
                     Text {
@@ -267,7 +269,7 @@ export component SftpToolView inherits Rectangle {
                         HorizontalLayout {
                             padding-left: 8px + n.depth * 18px;
                             spacing: 8px;
-                            Text { width: 18px; text: n.is-folder ? "📁" : "🖥"; vertical-alignment: center; }
+                            Text { width: 18px; text: n.is-folder ? "📁" : "🖥"; font-family: "Segoe UI Symbol"; vertical-alignment: center; }
                             VerticalLayout {
                                 horizontal-stretch: 1;
                                 alignment: center;

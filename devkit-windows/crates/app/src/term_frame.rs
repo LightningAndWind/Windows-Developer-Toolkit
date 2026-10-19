@@ -22,6 +22,11 @@ impl TermFrame {
         Self { model, palette, sb_rows_in_model: 0, prev_sb_len: 0 }
     }
 
+    /// 模型中 scrollback 尾部窗口的行数（0 = 纯屏幕行，无需贴底滚动）。
+    pub fn sb_rows(&self) -> usize {
+        self.sb_rows_in_model
+    }
+
     pub fn set_palette(&mut self, p: AnsiPalette) {
         self.palette = p;
         // 外观切换后由上层重建整帧（换新 Frame + 空模型）

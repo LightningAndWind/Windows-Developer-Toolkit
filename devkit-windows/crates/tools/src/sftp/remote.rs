@@ -7,7 +7,7 @@ use russh::client::{self, Handle};
 use russh_sftp::client::SftpSession;
 use std::sync::Arc;
 
-struct ClientHandler {
+pub struct ClientHandler {
     accept_host: bool,
 }
 
@@ -69,7 +69,7 @@ impl RemoteBackend {
             anyhow::bail!("认证失败：用户名或凭据不正确");
         }
 
-        let mut channel = handle
+        let channel = handle
             .channel_open_session()
             .await
             .map_err(|e| anyhow!("打开会话通道失败：{e}"))?;
@@ -141,6 +141,55 @@ impl SftpBackend for RemoteBackend {
             .await
             .map_err(|e| anyhow!("创建文件失败：{e}"))?;
         use tokio::io::AsyncWriteExt;
+        file.write_all(data)
+            .await
+            .map_err(|e| anyhow!("写入文件失败：{e}"))?;
+        file.flush().await.ok();
+        Ok(())
+    }
+
+    async fn read_chunk(&mut self, path: &str, offset: u64, len: u64) -> Result<Vec<u8>> {
+        use tokio::io::{AsyncReadExt, AsyncSeekExt};
+        let mut file = self
+            .sftp
+            .open(path)
+            .await
+            .map_err(|e| anyhow!("打开文件失败：{e}"))?;
+        file.seek(std::io::SeekFrom::Start(offset))
+            .await
+            .map_err(|e| anyhow!("定位文件失败：{e}"))?;
+        let mut buf = vec![0u8; len as usize];
+        let mut read = 0usize;
+        while read < buf.len() {
+            let n = file.read(&mut buf[read..]).await.map_err(|e| anyhow!("读取文件失败：{e}"))?;
+            if n == 0 {
+                break;
+            }
+            read += n;
+        }
+        buf.truncate(read);
+        Ok(buf)
+    }
+
+    async fn write_chunk(&mut self, path: &str, offset: u64, data: &[u8]) -> Result<()> {
+        use russh_sftp::protocol::OpenFlags;
+        use tokio::io::{AsyncSeekExt, AsyncWriteExt};
+        let mut file = if offset == 0 {
+            self.sftp
+                .create(path)
+                .await
+                .map_err(|e| anyhow!("创建文件失败：{e}"))?
+        } else {
+            self.sftp
+                .open_with_flags(path, OpenFlags::WRITE | OpenFlags::CREATE)
+                .await
+                .map_err(|e| anyhow!("打开文件失败：{e}"))?
+        };
+        if offset > 0 {
+            file.seek(std::io::SeekFrom::Start(offset))
+                .await
+                .map_err(|e| anyhow!("定位文件失败：{e}"))?;
+        }
         file.write_all(data)
             .await
             .map_err(|e| anyhow!("写入文件失败：{e}"))?;

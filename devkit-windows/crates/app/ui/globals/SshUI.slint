@@ -44,7 +44,9 @@ export global SshUI {
     callback cancel-editor();
     callback pick-key-file();
     callback disconnect();
+    callback show-chooser();
     callback reconnect();
+    callback editor-kind-changed(int);   // 0=远程 1=本地
     callback editor-auth-cycled();
     callback copy-summary();
 }

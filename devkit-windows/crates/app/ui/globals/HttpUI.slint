@@ -44,6 +44,7 @@ export global HttpUI {
     in-out property <bool> sending;
     in-out property <int> resp-tab: 0;        // 0美化 1原始 2头 3预览
     in-out property <string> resp-body;
+    in-out property <string> resp-body-pretty;
     in-out property <string> resp-headers-text;
     in-out property <string> resp-status-line;
     in-out property <bool> resp-ok;
@@ -63,6 +64,10 @@ export global HttpUI {
     // 历史 / 树
     in-out property <[HttpHistoryRow]> history;
     in-out property <[HttpTreeNode]> tree;
+    // 重命名（集合节点）
+    in-out property <bool> rename-visible: false;
+    in-out property <int> rename-index: -1;
+    in-out property <string> rename-input;
 
     callback send();
     callback stop();
@@ -93,6 +98,9 @@ export global HttpUI {
     callback tree-deleted(int);
     callback tree-renamed(int, string);
     callback tree-moved(int, int);
+    callback tree-rename-requested(int);
+    callback tree-rename-confirm();
+    callback tree-rename-cancel();
     callback new-folder(int);
     callback copy-body();
     callback load-history(int);

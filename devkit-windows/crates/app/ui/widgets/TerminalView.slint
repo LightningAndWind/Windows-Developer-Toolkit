@@ -1,5 +1,6 @@
-// 终端视图：按行/跨段渲染 ANSI 输出网格，行高固定、跨段同色合并。
-// 数据由 Rust 侧 TermFrame 同步进 lines 模型；键盘事件回传 Rust 编码后写 PTY。
+// 终端视图：按单元格绝对定位渲染 ANSI 网格（行高固定、跨段同色合并）。
+// 每个 span 带起始列与单元格数，宽度 = cells × char-width，等宽字体下与网格严格对齐；
+// 光标格由 Rust 侧以反色 span 表达，因此不需要额外定位。
 import { ListView } from "std-widgets.slint";
 import { Theme } from "../globals/Theme.slint";
 
@@ -7,6 +8,8 @@ export struct TermSpan {
     text: string,
     fg: color,
     bg: color,
+    start: int,
+    cells: int,
     bold: bool,
     underline: bool,
 }
@@ -19,11 +22,10 @@ export struct TermLine {
 export global TermHostUI {
     in-out property <[TermLine]> lines;
     in-out property <int> pulse;
-    /// 模型中 scrollback 行数；>0 时 pulse 才贴底滚动，否则置顶（避免把屏幕首行顶出视口）。
-    in-out property <int> sb-rows;
     in-out property <float> cols-f: 80.0;
     in-out property <float> rows-f: 24.0;
-    in-out property <color> term-bg: #18181b;
+    in-out property <color> term-bg: #1b1b1f;
+    in-out property <color> term-fg: #dcdde4;
     callback send-key(string, bool, bool, bool);
     callback geometry-changed();
 }
@@ -32,67 +34,117 @@ export component TerminalView inherits Rectangle {
     in-out property <[TermLine]> lines <=> TermHostUI.lines;
     in-out property <int> pulse <=> TermHostUI.pulse;
     in-out property <color> term-bg <=> TermHostUI.term-bg;
-    // 视口内可见行数/列数（浮点，Rust 侧取整）
-    out property <float> cols-f: Math.max(2.0, Math.floor(((self.width - 16px) / 1px) / (root.char-width / 1px)));
-    out property <float> rows-f: Math.max(2.0, Math.floor((self.height / 1px) / (root.row-height / 1px)));
 
-    in property <length> font-size: 14px;
-    out property <length> row-height: font-size * 1.45;
-    out property <length> char-width: font-size * 0.62;
-    in property <string> mono-font: "Consolas";
+    in property <length> font-size: Theme.fs-body;
+    // Consolas 的字符步进正好是 0.55em（实测 13px → 7.15px），据此做像素级单元格对齐。
+    out property <length> char-width: font-size * 0.55;
+    out property <length> row-height: Math.round(font-size * 1.5 / 1px) * 1px;
+    in property <length> inset: 8px;
+
+    // 视口内可见行数/列数（浮点，Rust 侧取整）
+    out property <float> cols-f: Math.max(2.0, Math.floor(((self.width - inset * 2) / 1px) / (char-width / 1px)));
+    out property <float> rows-f: Math.max(2.0, Math.floor(((self.height - inset * 2) / 1px) / (row-height / 1px)));
+
+    // ---- 自动滚动到底部 ----
+    // ListView 的 content-height 要等布局跑完才更新；布局之前写 content-y 会被
+    // Flickable 的「越界校正」直接打回顶部（表现为新输出看不见、要手动滚）。
+    // 所以贴底分两步：
+    //   1) 脉冲到达时按「模型行数 × 行高」算一个贴底位置（此时内容高度可能还是旧值，
+    //      写进去可能被校正掉，无所谓）；
+    //   2) 真正的贴底动作放在「内容高度变化」之后 —— 那时布局已更新，位置不会再被校正。
+    // follow：用户手动上滚后暂停跟随（不把人拽走），滚回底部自动恢复。
+    in-out property <bool> follow: true;
+    // 镜像 ListView 的内容高度：布局更新后它才变，用来判断“是否已在底部”。
+    out property <length> view-content-height: lv.content-height;
+    out property <length> bottom-offset: Math.min(0px, lv.height - root.view-content-height);
+
+    function scroll-to-bottom() {
+        lv.content-y = Math.min(0px, lv.height - root.row-height * root.lines.length);
+    }
 
     background: root.term-bg;
 
     lv := ListView {
-        x: 8px;
-        width: parent.width - 16px;
-        height: parent.height;
+        x: root.inset;
+        y: root.inset;
+        width: parent.width - root.inset * 2;
+        height: parent.height - root.inset * 2;
+
+        // 用户滚动后判断是否仍在底部：在底部就继续跟随，否则暂停。
+        scrolled => {
+            root.follow = lv.content-y <= root.bottom-offset + 1px;
+        }
 
         for line in root.lines: Rectangle {
             height: root.row-height;
             background: transparent;
 
-            HorizontalLayout {
-                spacing: 0;
+            for sp in line.spans: Rectangle {
+                x: sp.start * root.char-width;
+                width: sp.cells * root.char-width;
+                height: root.row-height;
+                background: sp.bg;
+                clip: true;
 
-                for sp in line.spans: Rectangle {
-                    background: sp.bg;
-                    horizontal-stretch: 0;
-
-                    Text {
-                        text: sp.text;
-                        color: sp.fg;
-                        font-family: root.mono-font;
-                        font-size: root.font-size;
-                        font-weight: sp.bold ? 700 : 400;
-                        vertical-alignment: center;
-                    }
-
-                    if sp.underline: Rectangle {
-                        height: 1px;
-                        y: parent.height - 2px;
-                        background: sp.fg;
-                    }
+                Text {
+                    x: 0;
+                    width: parent.width;
+                    height: parent.height;
+                    text: sp.text;
+                    color: sp.fg;
+                    font-family: "Consolas";
+                    font-size: root.font-size;
+                    font-weight: sp.bold ? 700 : 400;
+                    vertical-alignment: center;
+                    wrap: no-wrap;
+                    overflow: clip;
                 }
 
-                // 行尾填充：span 均为 stretch 0，若无元素吸收剩余宽度，
-                // 布局会把空间平分给各 span，把光标格（反色背景）拉宽成色条。
-                Rectangle { horizontal-stretch: 1; background: transparent; }
+                if sp.underline: Rectangle {
+                    y: parent.height - 2px;
+                    height: 1px;
+                    width: parent.width;
+                    background: sp.fg;
+                }
             }
         }
     }
 
     fs := FocusScope {
         key-pressed(e) => {
+            // Ctrl 组合键不交给终端（交给窗口级快捷键处理），但 Ctrl+C 需要发 SIGINT。
+            if (e.modifiers.control && !e.modifiers.alt) {
+                if (e.text == "c" || e.text == "C") {
+                    TermHostUI.send-key("\u{3}", false, false, false);
+                    return accept;
+                }
+                return reject;
+            }
             TermHostUI.send-key(e.text, e.modifiers.control, e.modifiers.alt, e.modifiers.shift);
             accept
         }
     }
 
+    // 点击聚焦（不拦截滚轮：TouchArea 只接管按下）
+    ta := TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => { fs.focus(); }
+    }
+
     init => {
-        fs.focus();
         TermHostUI.cols-f = root.cols-f;
         TermHostUI.rows-f = root.rows-f;
+    }
+
+    changed visible => {
+        if (self.visible) {
+            fs.focus();
+            TermHostUI.cols-f = root.cols-f;
+            TermHostUI.rows-f = root.rows-f;
+            TermHostUI.geometry-changed();
+            // 刚显示出来时内容高度才刚算出来，此时贴底才准确。
+            if (root.follow) { root.scroll-to-bottom(); }
+        }
     }
 
     public function grab-focus() {
@@ -100,12 +152,16 @@ export component TerminalView inherits Rectangle {
     }
 
     changed pulse => {
-        // 无 scrollback 时屏幕行必然放得下（rows-f 按 floor 计算），置顶显示；
-        // 有 scrollback 时跟随输出贴底。无脑贴底会把唯一有内容的屏幕首行推出视口（黑屏根因）。
-        if (TermHostUI.sb-rows > 0) {
-            lv.content-y = Math.min(0, lv.height - lv.content-height);
-        } else {
-            lv.content-y = 0;
+        // 有新输出：跟随模式下贴底（直接按模型行数算，不依赖尚未更新的 content-height）。
+        if (root.follow) {
+            root.scroll-to-bottom();
+        }
+    }
+
+    // 布局更新了内容高度（= 新输出已经撑开内容）：此时贴底才不会被越界校正打回。
+    changed view-content-height => {
+        if (root.follow) {
+            root.scroll-to-bottom();
         }
     }
 
@@ -116,5 +172,7 @@ export component TerminalView inherits Rectangle {
     changed height => {
         TermHostUI.rows-f = root.rows-f;
         TermHostUI.geometry-changed();
+        // 视口高度变了，贴底位置也要跟着变。
+        if (root.follow) { root.scroll-to-bottom(); }
     }
 }

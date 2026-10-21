@@ -1,10 +1,9 @@
 ﻿//! HTTP 工具粘合层：UI 全局镜像 ↔ 每标签运行时 ↔ 存储层 ↔ 网络。
 //! 对应 macOS 端 HTTPTool.swift 的视图模型职责。
 
-use crate::shell::{current_window, Ctx};
+use crate::shell::Ctx;
 use crate::{HttpHistoryRow, HttpTreeNode, HttpUI, KvRow, MainWindow};
 use anyhow::Result;
-use devkit_core::tool::ids;
 use devkit_tools::http::client::{send_blocking, SendError};
 use devkit_tools::http::curl::to_curl;
 use devkit_tools::http::model::{
@@ -12,7 +11,6 @@ use devkit_tools::http::model::{
 };
 use devkit_tools::http::stores as hstore;
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
-use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -66,15 +64,6 @@ pub struct HttpToolState {
 pub fn wire_http_callbacks(ctx: Rc<Ctx>) {
     let Some(ui) = crate::shell::current_window() else { return };
     let http_ui = ui.global::<HttpUI>();
-
-    macro_rules! on {
-        ($name:ident, $($cap:expr),* ; $f:expr) => {
-            http_ui.$name({
-                $(let $cap = $cap.clone();)*
-                move |$($cap,)*| { $f }
-            });
-        };
-    }
 
     // ---- 发送 / 停止 ----
     {
@@ -188,6 +177,7 @@ pub fn wire_http_callbacks(ctx: Rc<Ctx>) {
             run.dirty = true;
             drop(runs);
             sync_tables(&ctx, &ui.global::<HttpUI>(), &active);
+            sync_dirty(&ctx, true);
         });
     }
     {
@@ -208,6 +198,7 @@ pub fn wire_http_callbacks(ctx: Rc<Ctx>) {
             run.dirty = true;
             drop(runs);
             sync_tables(&ctx, &ui.global::<HttpUI>(), &active);
+            sync_dirty(&ctx, true);
         });
     }
 
@@ -252,16 +243,22 @@ pub fn wire_http_callbacks(ctx: Rc<Ctx>) {
             let http_ui = ui.global::<HttpUI>();
             http_ui.set_body_kind(kind);
             let active = ctx.active.borrow().clone();
-            let mut runs = ctx.http_runs.borrow_mut();
-            if let Some(run) = runs.get_mut(active.as_str()) {
-                run.request.body.kind = match kind {
-                    1 => BodyKind::Json,
-                    2 => BodyKind::Form,
-                    3 => BodyKind::Raw,
-                    _ => BodyKind::None,
-                };
-                run.dirty = true;
-            }
+            let dirty = {
+                let mut runs = ctx.http_runs.borrow_mut();
+                let mut dirty = false;
+                if let Some(run) = runs.get_mut(active.as_str()) {
+                    run.request.body.kind = match kind {
+                        1 => BodyKind::Json,
+                        2 => BodyKind::Form,
+                        3 => BodyKind::Raw,
+                        _ => BodyKind::None,
+                    };
+                    run.dirty = true;
+                    dirty = true;
+                }
+                dirty
+            };
+            sync_dirty(&ctx, dirty);
         });
     }
     {
@@ -292,15 +289,21 @@ pub fn wire_http_callbacks(ctx: Rc<Ctx>) {
             let http_ui = ui.global::<HttpUI>();
             http_ui.set_auth_kind(kind);
             let active = ctx.active.borrow().clone();
-            let mut runs = ctx.http_runs.borrow_mut();
-            if let Some(run) = runs.get_mut(active.as_str()) {
-                run.request.auth.kind = match kind {
-                    1 => AuthKind::Bearer,
-                    2 => AuthKind::Basic,
-                    _ => AuthKind::None,
-                };
-                run.dirty = true;
-            }
+            let dirty = {
+                let mut runs = ctx.http_runs.borrow_mut();
+                let mut dirty = false;
+                if let Some(run) = runs.get_mut(active.as_str()) {
+                    run.request.auth.kind = match kind {
+                        1 => AuthKind::Bearer,
+                        2 => AuthKind::Basic,
+                        _ => AuthKind::None,
+                    };
+                    run.dirty = true;
+                    dirty = true;
+                }
+                dirty
+            };
+            sync_dirty(&ctx, dirty);
         });
     }
     {
@@ -316,12 +319,18 @@ pub fn wire_http_callbacks(ctx: Rc<Ctx>) {
             };
             http_ui.set_timeout_secs(next as i32);
             let active = ctx.active.borrow().clone();
-            let mut runs = ctx.http_runs.borrow_mut();
-            if let Some(run) = runs.get_mut(active.as_str()) {
-                run.request.timeout_secs = next;
-                run.dirty = true;
-            }
+            let dirty = {
+                let mut runs = ctx.http_runs.borrow_mut();
+                let mut dirty = false;
+                if let Some(run) = runs.get_mut(active.as_str()) {
+                    run.request.timeout_secs = next;
+                    run.dirty = true;
+                    dirty = true;
+                }
+                dirty
+            };
             set_status(&http_ui, &format!("空闲超时：{next} 秒"));
+            sync_dirty(&ctx, dirty);
         });
     }
 
@@ -382,7 +391,6 @@ pub fn wire_http_callbacks(ctx: Rc<Ctx>) {
         http_ui.on_save_as_dialog(move || open_save_dialog(&ctx));
     }
     {
-        let ctx = ctx.clone();
         http_ui.on_save_dialog_cancel(move || {
             let Some(ui) = crate::shell::current_window() else { return };
             ui.global::<HttpUI>().set_save_dialog_visible(false);
@@ -467,13 +475,104 @@ pub fn wire_http_callbacks(ctx: Rc<Ctx>) {
         let ctx = ctx.clone();
         http_ui.on_new_folder(move |parent| create_folder_at(&ctx, parent as i64));
     }
+    {
+        // 重命名对话框：打开时带入当前名称
+        let ctx = ctx.clone();
+        http_ui.on_tree_rename_requested(move |index| {
+            let Some(ui) = crate::shell::current_window() else { return };
+            let http_ui = ui.global::<HttpUI>();
+            let Some((id, is_folder)) = tree_id_at(&ctx, index as usize) else { return };
+            let Some(db) = ctx.db() else { return };
+            let name = if is_folder {
+                hstore::list_folders(&db).unwrap_or_default()
+                    .into_iter()
+                    .find(|f| f.id == id)
+                    .map(|f| f.name)
+                    .unwrap_or_default()
+            } else {
+                hstore::get_request(&db, &id)
+                    .ok()
+                    .flatten()
+                    .map(|r| r.name)
+                    .unwrap_or_default()
+            };
+            http_ui.set_rename_index(index);
+            http_ui.set_rename_input(name.into());
+            http_ui.set_rename_visible(true);
+        });
+    }
+    {
+        http_ui.on_tree_rename_cancel(move || {
+            let Some(ui) = crate::shell::current_window() else { return };
+            let http_ui = ui.global::<HttpUI>();
+            http_ui.set_rename_visible(false);
+            http_ui.set_rename_index(-1);
+        });
+    }
+    {
+        let ctx = ctx.clone();
+        http_ui.on_tree_rename_confirm(move || {
+            let Some(ui) = crate::shell::current_window() else { return };
+            let http_ui = ui.global::<HttpUI>();
+            let index = http_ui.get_rename_index();
+            let name = http_ui.get_rename_input().trim().to_string();
+            http_ui.set_rename_visible(false);
+            http_ui.set_rename_index(-1);
+            if index < 0 || name.is_empty() {
+                return;
+            }
+            let Some(db) = ctx.db() else { return };
+            let Some((id, is_folder)) = tree_id_at(&ctx, index as usize) else { return };
+            let result = if is_folder {
+                hstore::rename_folder(&db, &id, &name)
+            } else {
+                hstore::rename_request(&db, &id, &name)
+            };
+            match result {
+                Ok(()) => {
+                    // 当前编辑器若绑定了该请求，同步更新显示名
+                    let active = ctx.active.borrow().clone();
+                    let mut runs = ctx.http_runs.borrow_mut();
+                    if let Some(run) = runs.get_mut(active.as_str()) {
+                        if !is_folder && run.saved_id.as_deref() == Some(id.as_str()) {
+                            run.saved_name = name.clone();
+                        }
+                    }
+                    drop(runs);
+                    if let Some(ui) = crate::shell::current_window() {
+                        let http_ui = ui.global::<HttpUI>();
+                        http_ui.set_saved_name(name.clone().into());
+                        sync_to_ui(&ctx, &ui);
+                    }
+                    set_status(&http_ui, "已重命名");
+                }
+                Err(e) => set_status(&http_ui, &format!("重命名失败：{e}")),
+            }
+        });
+    }
+    {
+        // 兼容旧回调（移动 / 直接改名）：当前 UI 用对话框流程，这里保留为空实现以免未接线的回调报错。
+        http_ui.on_tree_renamed(move |index, name| {
+            let _ = (index, name);
+        });
+    }
+    {
+        http_ui.on_tree_moved(move |index, target| {
+            let _ = (index, target);
+        });
+    }
 
     // ---- 响应复制 ----
     {
         http_ui.on_copy_body(move || {
             let Some(ui) = crate::shell::current_window() else { return };
             let http_ui = ui.global::<HttpUI>();
-            let body = http_ui.get_resp_body().to_string();
+            // 复制当前视图展示的内容（美化页复制美化结果，原始页复制原始报文）。
+            let body = if http_ui.get_resp_tab() == 0 {
+                http_ui.get_resp_body_pretty().to_string()
+            } else {
+                http_ui.get_resp_body().to_string()
+            };
             match arboard::Clipboard::new().and_then(|mut c| c.set_text(body)) {
                 Ok(()) => set_status(&http_ui, "已复制响应内容"),
                 Err(e) => set_status(&http_ui, &format!("复制失败：{e}")),
@@ -554,38 +653,50 @@ fn auth_kind_index(k: AuthKind) -> u8 {
 fn edit_kv(ctx: &Rc<Ctx>, table: usize, index: usize, field: usize, value: &str) {
     let Some(ui) = crate::shell::current_window() else { return };
     let active = ctx.active.borrow().clone();
-    let mut runs = ctx.http_runs.borrow_mut();
-    let Some(run) = runs.get_mut(active.as_str()) else { return };
-    let list = match table {
-        0 => &mut run.request.params,
-        1 => &mut run.request.headers,
-        _ => &mut run.request.body.form,
-    };
-    if let Some(kv) = list.get_mut(index) {
-        match field {
-            0 => kv.key = value.to_string(),
-            _ => kv.value = value.to_string(),
+    let dirty = {
+        let mut runs = ctx.http_runs.borrow_mut();
+        let Some(run) = runs.get_mut(active.as_str()) else { return };
+        let list = match table {
+            0 => &mut run.request.params,
+            1 => &mut run.request.headers,
+            _ => &mut run.request.body.form,
+        };
+        let mut dirty = false;
+        if let Some(kv) = list.get_mut(index) {
+            match field {
+                0 => kv.key = value.to_string(),
+                _ => kv.value = value.to_string(),
+            }
+            run.dirty = true;
+            dirty = true;
         }
-        run.dirty = true;
-    }
+        dirty
+    };
+    sync_dirty(ctx, dirty);
+    let _ = ui;
 }
 
 fn edit_kv_bool(ctx: &Rc<Ctx>, table: usize, index: usize, f: impl FnOnce(&mut HTTPKV)) {
     let Some(ui) = crate::shell::current_window() else { return };
     let active = ctx.active.borrow().clone();
-    let mut runs = ctx.http_runs.borrow_mut();
-    let Some(run) = runs.get_mut(active.as_str()) else { return };
-    let list = match table {
-        0 => &mut run.request.params,
-        1 => &mut run.request.headers,
-        _ => &mut run.request.body.form,
+    let dirty = {
+        let mut runs = ctx.http_runs.borrow_mut();
+        let Some(run) = runs.get_mut(active.as_str()) else { return };
+        let list = match table {
+            0 => &mut run.request.params,
+            1 => &mut run.request.headers,
+            _ => &mut run.request.body.form,
+        };
+        let mut dirty = false;
+        if let Some(kv) = list.get_mut(index) {
+            f(kv);
+            run.dirty = true;
+            dirty = true;
+        }
+        dirty
     };
-    if let Some(kv) = list.get_mut(index) {
-        f(kv);
-        run.dirty = true;
-    }
-    drop(runs);
     sync_tables(ctx, &ui.global::<HttpUI>(), &active);
+    sync_dirty(ctx, dirty);
 }
 
 // ---------- 发送 ----------
@@ -607,8 +718,8 @@ fn poll_send_result(ctx: &Rc<Ctx>, tab_id: &str) {
     let Some(result) = result else { return };
     let mut response = None;
     let error_text;
-    let mut request_for_history = None;
-    let mut saved_id_for_history = None;
+    let request_for_history;
+    let saved_id_for_history;
     match result {
         Ok(resp) => {
             error_text = String::new();
@@ -656,8 +767,10 @@ fn poll_send_result(ctx: &Rc<Ctx>, tab_id: &str) {
 
 fn apply_response_view(http_ui: &HttpUI, run: &HttpRun, tab: usize) {
     let Some(resp) = &run.response else {
-        http_ui.set_resp_status_line("尚无响应".into());
+        // 没有响应时保持状态行为空，UI 会显示「尚未发送请求」。
+        http_ui.set_resp_status_line("".into());
         http_ui.set_resp_body("".into());
+        http_ui.set_resp_body_pretty("".into());
         http_ui.set_resp_headers_text("".into());
         http_ui.set_resp_ok(false);
         http_ui.set_resp_truncated(false);
@@ -713,7 +826,9 @@ fn apply_response_view(http_ui: &HttpUI, run: &HttpRun, tab: usize) {
         }
         _ => resp.body.clone(),
     };
-    http_ui.set_resp_body(body_text.into());
+    // 「原始」页始终是原始报文；「美化」页是格式化后的 JSON。
+    http_ui.set_resp_body(resp.body.clone().into());
+    http_ui.set_resp_body_pretty(body_text.into());
 }
 
 // ---------- 历史 ----------
@@ -757,7 +872,7 @@ pub fn format_time(unix: f64) -> String {
     }
 }
 
-fn history_id_at(ctx: &Rc<Ctx>, index: usize) -> Option<String> {
+fn history_id_at(_ctx: &Rc<Ctx>, index: usize) -> Option<String> {
     let Some(ui) = crate::shell::current_window() else { return None };
     let http_ui = ui.global::<HttpUI>();
     let model = http_ui.get_history();
@@ -859,7 +974,7 @@ fn walk_folders(
     }
 }
 
-fn tree_id_at(ctx: &Rc<Ctx>, index: usize) -> Option<(String, bool)> {
+fn tree_id_at(_ctx: &Rc<Ctx>, index: usize) -> Option<(String, bool)> {
     let Some(ui) = crate::shell::current_window() else { return None };
     let http_ui = ui.global::<HttpUI>();
     http_ui.get_tree().row_data(index).map(|n| (n.id.to_string(), n.is_folder))
@@ -974,7 +1089,7 @@ fn refresh_save_folders(ctx: &Rc<Ctx>) {
     let mut options = vec!["（根目录）".to_string()];
     let by_id: std::collections::HashMap<&str, &hstore::FolderRow> =
         folders.iter().map(|f| (f.id.as_str(), f)).collect();
-    let mut path_of = |id: &str| -> String {
+    let path_of = |id: &str| -> String {
         let mut parts = Vec::new();
         let mut cur = Some(id.to_string());
         let mut hops = 0;
@@ -1073,6 +1188,18 @@ fn save_current_with_dialog(ctx: &Rc<Ctx>, ui: &MainWindow, name: &str, folder_i
 
 fn set_status(http_ui: &HttpUI, msg: &str) {
     http_ui.set_status(msg.into());
+}
+
+/// 把运行时的「未保存」标记同步到 UI（表格 / Body / 认证等改动后调用）。
+///
+/// `dirty` 由调用方传入：调用点通常正持有 `http_runs` 的可变借用，
+/// 这里再读一次 http_runs 会触发 RefCell 重复借出 panic（曾导致切换认证方式时闪退）。
+fn sync_dirty(ctx: &Rc<Ctx>, dirty: bool) {
+    let Some(ui) = crate::shell::current_window() else { return };
+    let active = ctx.active.borrow().clone();
+    ui.global::<HttpUI>().set_dirty(dirty);
+    // 侧栏标签上的未保存圆点
+    crate::shell::set_tab_dirty(ctx, &active, dirty);
 }
 
 fn urldecode(s: &str) -> String {

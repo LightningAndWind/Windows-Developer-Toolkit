@@ -2,7 +2,7 @@
 //! 读线程把 PTY 原始输出经 channel 推给 UI 侧；写侧直接写字节流。
 
 use anyhow::{anyhow, Result};
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::Receiver;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -20,10 +20,20 @@ impl PtySession {
     /// 启动一个 shell 会话。`shell` 为 None 时自动选择 PowerShell。
     pub fn spawn(shell: Option<&str>, rows: u16, cols: u16, cwd: Option<&str>) -> Result<Self> {
         let program = shell.map(|s| s.to_string()).unwrap_or_else(default_shell);
-        let args: Vec<String> = if program.ends_with("powershell.exe")
-            || program.ends_with("pwsh.exe")
-        {
-            vec!["-NoLogo".into()]
+        // 控制台默认走系统 ANSI/OEM 代码页（中文环境为 936），而终端管线按 UTF-8 解码，
+        // 不统一会出现中文输入/回显乱码。这里在启动时把输入输出都切到 UTF-8。
+        let args: Vec<String> = if program.ends_with("powershell.exe") || program.ends_with("pwsh.exe") {
+            vec![
+                "-NoLogo".into(),
+                "-NoExit".into(),
+                "-Command".into(),
+                "[Console]::InputEncoding=[System.Text.UTF8Encoding]::new($false); \
+                 [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); \
+                 chcp 65001 > $null"
+                    .into(),
+            ]
+        } else if program.ends_with("cmd.exe") {
+            vec!["/K".into(), "chcp 65001 >nul".into()]
         } else {
             Vec::new()
         };

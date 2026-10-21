@@ -7,6 +7,17 @@ fn main() {
         check_tools();
         return;
     }
+    // 无头渲染一张界面截图（排障 / 文档用）：devkit --screenshot out.png
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(pos) = args.iter().position(|a| a == "--screenshot") {
+        let path = args.get(pos + 1).cloned().unwrap_or_else(|| "devkit.png".to_string());
+        if let Err(e) = devkit::shell::screenshot(&path) {
+            eprintln!("截图失败：{e}");
+            std::process::exit(1);
+        }
+        println!("{path}");
+        return;
+    }
     if let Err(e) = devkit::shell::run_app() {
         eprintln!("devkit 启动失败：{e}");
         std::process::exit(1);

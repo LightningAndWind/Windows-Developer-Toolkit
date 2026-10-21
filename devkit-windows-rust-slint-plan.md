@@ -1,5 +1,18 @@
 # devkit Windows 端移植计划（Rust + Slint）
 
+> **重构说明（2026-10）**：本文件保留最初的移植计划作为历史记录。
+> 实际实现已在「Windows 原生化」重构中调整要点：
+> - 样式不再复刻 macOS 外观，改用 Slint 内置 **Fluent（Windows 11 原生）风格**，
+>   自绘控件只从 `Palette` 取色，深浅色与系统强调色自动跟随；
+> - 界面用原生 `TabWidget` / `ComboBox` / `CheckBox` / `ScrollView` 承载分区与表单，
+>   工具条统一 `cross-axis-alignment: center` 垂直居中、末尾放 stretch 占位避免按钮被拉伸；
+> - Git 的所有子进程改到后台线程执行，UI 不再被 `pull` / `push` 卡住；
+> - 补齐了 macOS 端已有但 Windows 端缺失的功能（HTTP 集合树、Git 仓库登记 / 克隆 /
+>   密钥管理 / 远程地址编辑 / 历史分页、JSON 复制子树、终端内全局快捷键等）；
+> - 新增 `devkit.exe --screenshot` 无头截图，便于在没有桌面会话的环境里检查排版。
+>
+> 当前实现说明以 `README.md` 为准。
+
 ## Context
 
 工作区已有完整的 macOS SwiftUI 开发者工具箱（`Macos-Developer-Toolkit/devkit/devkit/`），含 HTTP / SSH / SFTP / Git / JSON 五大工具 + 完整 Shell（标签页、分组、Launcher、设置、会话快照、防休眠、外观三态）。用户要求仿照该应用，用 Rust + WinUI/Slint 在 Windows 上完整实现同等功能。

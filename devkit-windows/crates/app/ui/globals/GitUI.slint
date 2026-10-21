@@ -83,6 +83,7 @@ export global GitUI {
     in-out property <bool> has-more-history;
     // 密钥
     in-out property <[GitKeyRow]> keys;
+    in-out property <bool> keys-visible: false;
     // 输出控制台 / toast
     in-out property <bool> console-visible;
     in-out property <string> console-text;
@@ -92,6 +93,7 @@ export global GitUI {
     in-out property <string> clone-url;
     in-out property <string> clone-parent;
     in-out property <string> clone-alias;
+    in-out property <bool> clone-visible: false;
     in-out property <string> status;
     in-out property <bool> busy;
 
@@ -127,6 +129,8 @@ export global GitUI {
     callback conflict-theirs(int);
     callback conflict-resolved(int);
     callback keys-open();
+    callback keys-close();
+    callback console-close();
     callback key-generate();
     callback key-import();
     callback key-delete(int);
@@ -135,4 +139,7 @@ export global GitUI {
     callback unbind-key();
     callback edit-remote-url(string);
     callback rebase-abort();
+    callback clone-cancel();
+    callback clone-confirm();
+    callback clone-browse();
 }

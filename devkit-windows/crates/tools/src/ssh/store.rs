@@ -1,7 +1,7 @@
 //! SSH 会话记录库与已知主机信任存储（SQLite）。
 //! 对应 macOS 端 SSHProfileStore / SSHHostKeyStore / SSHKeyStorage。
 
-use super::model::{SSHAuthKind, SSHFolder, SSHProfile, SSHSessionKind};
+use super::model::{SSHAuthKind, SSHProfile, SSHSessionKind};
 use anyhow::Result;
 use devkit_core::db::Database;
 use rusqlite::params;

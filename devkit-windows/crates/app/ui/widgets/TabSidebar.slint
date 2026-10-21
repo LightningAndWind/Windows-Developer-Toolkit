@@ -1,16 +1,19 @@
-// 左侧竖向标签栏：分组标签列表 + 新建按钮 + 底部操作条（设置 / 防休眠 / 外观）。
+// 左侧竖向标签栏：分组 + 标签列表 + 新建入口 + 底部操作条。
+// 全部使用 Theme（= 系统 Fluent 配色），行高与内边距统一，避免错位。
 import { ListView } from "std-widgets.slint";
 import { Theme } from "../globals/Theme.slint";
 import { AppState, TabItemData, SidebarRow } from "../globals/AppState.slint";
+import { AppButton, AppIconButton, Label, HLine } from "../components/Controls.slint";
 
 component TabRow inherits Rectangle {
     in property <TabItemData> data;
     in property <int> indent: 0;
+    in property <int> color-index: 0;
     in property <bool> active;
 
-    height: 36px;
-    border-radius: 7px;
-    background: active ? Theme.active : (ta.has-hover ? Theme.hover : transparent);
+    height: 30px;
+    border-radius: Theme.radius;
+    background: active ? Theme.accent-soft : (ta.has-hover ? Theme.hover : transparent);
 
     ta := TouchArea {
         property <PointerEventButton> down-btn: PointerEventButton.left;
@@ -23,14 +26,12 @@ component TabRow inherits Rectangle {
                 press-x = self.mouse-x;
                 press-y = self.mouse-y;
             }
-            // 右键：打开标签菜单
             if (e.kind == PointerEventKind.up && e.button == PointerEventButton.right) {
                 AppState.context-x = self.absolute-position.x + self.mouse-x;
                 AppState.context-y = self.absolute-position.y + self.mouse-y;
                 AppState.tab-context-tab = data.id;
                 AppState.tab-context-visible = true;
             }
-            // 左键释放：若在拖拽中则执行落放
             if (e.kind == PointerEventKind.up && e.button == PointerEventButton.left) {
                 if (AppState.drag-active && AppState.drag-tab-id == data.id) {
                     AppState.tab-dropped();
@@ -42,14 +43,12 @@ component TabRow inherits Rectangle {
             }
         }
         clicked => {
-            // 拖拽结束的释放也满足 clicked，仅响应左键普通点击
             if (down-btn == PointerEventButton.left) {
                 AppState.select-tab(data.id);
             }
         }
         double-clicked => { AppState.rename-requested(data.id); }
         moved => {
-            // 超过点击容差即进入拖拽
             if (!AppState.drag-active && self.pressed
                 && (Math.abs(self.mouse-x - press-x) > 6px || Math.abs(self.mouse-y - press-y) > 6px)) {
                 AppState.drag-active = true;
@@ -65,77 +64,78 @@ component TabRow inherits Rectangle {
         }
     }
 
+    // 分组色条
+    if data.group-id != "": Rectangle {
+        x: 24px;
+        y: (parent.height - 16px) / 2;
+        width: 3px;
+        height: 16px;
+        border-radius: 1.5px;
+        background: Theme.group-color(root.color-index);
+    }
+
+    // 子项高度统一等于行高：布局的交叉轴不居中，只有撑满行高才能共用一条中线
     HorizontalLayout {
-        padding-left: 10px + root.indent * 16px;
-        padding-right: 8px;
-        spacing: 8px;
+        padding-left: 8px + root.indent * 24px;
+        padding-right: 4px;
+        spacing: 6px;
 
         Text {
-            text: data.icon;
-            width: 18px;
-            font-family: "Segoe UI Symbol";
+            text: root.data.icon;
+            width: 16px;
+            height: 30px;
+            font-family: "Segoe MDL2 Assets";
+            font-size: Theme.fs-small;
+            color: root.active ? Theme.text : Theme.text-secondary;
             vertical-alignment: center;
+            horizontal-alignment: center;
         }
 
-        Text {
-            text: data.title;
-            color: Theme.text;
-            font-size: 13px;
-            overflow: elide;
-            vertical-alignment: center;
+        Label {
+            text: root.data.title;
+            size: Theme.fs-small;
+            height: 30px;
             horizontal-stretch: 1;
+            color: root.active ? Theme.text : Theme.text-secondary;
         }
 
-        if data.dirty: Rectangle {
-            width: 7px;
-            height: 7px;
-            y: (parent.height - 7px) / 2;
-            border-radius: 4px;
-            background: Theme.accent;
+        if root.data.dirty: Rectangle {
+            width: 6px;
+            height: 30px;
+
+            Rectangle {
+                width: 6px;
+                height: 6px;
+                border-radius: 3px;
+                y: (parent.height - self.height) / 2;
+                background: Theme.accent;
+            }
         }
 
-        // 移入分组（悬停显示）
         Rectangle {
             width: 20px;
-            height: 18px;
-            y: (parent.height - 18px) / 2;
-            border-radius: 5px;
-            visible: ta.has-hover && AppState.groups.length > 0;
-            background: mv-ta.has-hover ? Theme.hover : transparent;
+            height: 30px;
 
-            mv-ta := TouchArea {
-                clicked => { AppState.open-group-picker(data.id); }
-            }
+            Rectangle {
+                width: 18px;
+                height: 18px;
+                y: (parent.height - self.height) / 2;
+                border-radius: Theme.radius;
+                visible: close-ta.has-hover || root.active;
+                background: close-ta.has-hover ? Theme.pressed : transparent;
 
-            Text {
-                text: "⋯";
-                font-size: 11px;
-                font-family: "Segoe UI Symbol";
-                color: Theme.text-secondary;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-        }
+                close-ta := TouchArea {
+                    clicked => { AppState.close-tab(root.data.id); }
+                }
 
-        Rectangle {
-            width: 18px;
-            height: 18px;
-            y: (parent.height - 18px) / 2;
-            border-radius: 9px;
-            visible: ta.has-hover;
-            background: close-ta.has-hover ? Theme.hover : transparent;
-
-            close-ta := TouchArea {
-                clicked => { AppState.close-tab(data.id); }
-            }
-
-            Text {
-                text: "✕";
-                font-size: 10px;
-                font-family: "Segoe UI Symbol";
-                color: Theme.text-secondary;
-                horizontal-alignment: center;
-                vertical-alignment: center;
+                Text {
+                    text: "\u{E711}";
+                    font-family: "Segoe MDL2 Assets";
+                    font-size: Theme.fs-caption;
+                    color: Theme.text-secondary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
             }
         }
     }
@@ -144,234 +144,227 @@ component TabRow inherits Rectangle {
 component GroupHeader inherits Rectangle {
     in property <SidebarRow> data;
 
-    // 拖拽命中检测：光标纵向落在本行即为目标分组（侧栏占满左列，命中只按 y 判定）
     property <bool> drop-hl: AppState.drag-active
         && AppState.drag-y >= self.absolute-position.y
         && AppState.drag-y < self.absolute-position.y + self.height;
 
     height: 28px;
-    border-radius: 6px;
+    border-radius: Theme.radius;
     border-width: drop-hl ? 1px : 0px;
     border-color: Theme.accent;
-    background: drop-hl ? Theme.accent-soft : (ta.has-hover ? Theme.hover : transparent);
+    background: drop-hl
+        ? Theme.accent-soft
+        : Theme.group-color(root.data.color-index).transparentize(0.9);
 
-    // 只有一个分组头在任一时刻为 true；离开时若仍是自己记录的目标则清空
     changed drop-hl => {
         if (self.drop-hl) {
-            AppState.drag-hover-group = data.group-id;
-        } else if (AppState.drag-hover-group == data.group-id) {
+            AppState.drag-hover-group = root.data.group-id;
+        } else if (AppState.drag-hover-group == root.data.group-id) {
             AppState.drag-hover-group = "";
         }
     }
 
     ta := TouchArea {
-        clicked => { AppState.toggle-group(data.group-id); }
+        clicked => { AppState.toggle-group(root.data.group-id); }
     }
 
+    // 同 TabRow：子项撑满 28px 行高，圆点 / 标题 / 计数 / 箭头共用中线
     HorizontalLayout {
-        padding-left: 6px;
-        padding-right: 6px;
+        padding-left: 8px;
+        padding-right: 4px;
         spacing: 6px;
-
-        Text {
-            width: 12px;
-            text: data.collapsed ? "▸" : "▾";
-            color: Theme.text-secondary;
-            font-size: 10px;
-            font-family: "Segoe UI Symbol";
-            vertical-alignment: center;
-        }
 
         Rectangle {
             width: 8px;
-            height: 8px;
-            y: 10px;
-            border-radius: 4px;
-            background: Theme.group-color(data.color-index);
+            height: 28px;
+
+            Rectangle {
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                y: (parent.height - self.height) / 2;
+                background: Theme.group-color(root.data.color-index);
+            }
         }
 
-        Text {
-            text: data.name;
-            color: Theme.text;
-            font-size: 12px;
-            font-weight: 600;
-            overflow: elide;
-            vertical-alignment: center;
+        Label {
+            text: root.data.name;
+            size: Theme.fs-small;
+            height: 28px;
+            strong: true;
+            role: 1;
             horizontal-stretch: 1;
-        }
-
-        Text {
-            text: "\{data.group-count}";
-            color: Theme.text-secondary;
-            font-size: 10px;
-            vertical-alignment: center;
         }
 
         Rectangle {
             width: 18px;
-            height: 18px;
-            y: 5px;
-            border-radius: 5px;
-            visible: ta.has-hover;
-            background: del-ta.has-hover ? Theme.danger : transparent;
+            height: 28px;
 
-            del-ta := TouchArea {
-                clicked => { AppState.delete-group(data.group-id); }
-            }
+            Rectangle {
+                width: 18px;
+                height: 18px;
+                y: (parent.height - self.height) / 2;
+                border-radius: Theme.radius;
+                visible: del-ta.has-hover;
+                background: del-ta.has-hover ? Theme.danger-soft : transparent;
 
-            Text {
-                text: "✕";
-                font-size: 9px;
-                font-family: "Segoe UI Symbol";
-                color: del-ta.has-hover ? #ffffff : Theme.text-secondary;
-                horizontal-alignment: center;
-                vertical-alignment: center;
+                del-ta := TouchArea {
+                    clicked => { AppState.delete-group(root.data.group-id); }
+                }
+
+                Text {
+                    text: "\u{E711}";
+                    font-size: Theme.fs-caption;
+                    font-family: "Segoe MDL2 Assets";
+                    color: del-ta.has-hover ? Theme.danger : Theme.text-tertiary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
             }
         }
-    }
-}
 
-component FooterButton inherits Rectangle {
-    in property <string> icon;
-    in property <bool> on;
-    callback clicked;
+        Text {
+            text: "\{root.data.group-count}";
+            height: 28px;
+            color: Theme.text-tertiary;
+            font-size: Theme.fs-caption;
+            vertical-alignment: center;
+        }
 
-    width: 30px;
-    height: 30px;
-    border-radius: 7px;
-    background: ta.has-hover ? Theme.hover : (on ? Theme.accent-soft : transparent);
-
-    ta := TouchArea {
-        clicked => { root.clicked(); }
-    }
-
-    Text {
-        text: root.icon;
-        font-size: 15px;
-        font-family: "Segoe UI Symbol";
-        horizontal-alignment: center;
-        vertical-alignment: center;
+        Text {
+            width: 14px;
+            height: 28px;
+            text: root.data.collapsed ? "\u{E76C}" : "\u{E70D}";
+            color: Theme.text-secondary;
+            font-size: Theme.fs-caption;
+            font-family: "Segoe MDL2 Assets";
+            vertical-alignment: center;
+            horizontal-alignment: center;
+        }
     }
 }
 
 export component TabSidebar inherits Rectangle {
-    background: Theme.sidebar-bg;
+    background: Theme.surface;
 
     VerticalLayout {
-        // 顶部占位（对应 Mac 端红绿灯区域）
-        Rectangle { height: 12px; }
+        spacing: 0;
 
-        // 标签列表（分组头 + 成员 + 未分组）
-        Rectangle {
-            horizontal-stretch: 1;
-            ListView {
-                x: 6px;
-                width: parent.width - 12px;
-
-                // 委托必须显式高度：否则 Flickable 的 content-height 为 0，滚动定位错乱
-                for row in AppState.sidebar-rows: Rectangle {
-                    width: parent.width;
-                    height: row.kind == 0 ? 28px : 36px;
-
-                    if row.kind == 0: GroupHeader { data: row; }
-                    if row.kind == 1: TabRow {
-                        data: row.tab;
-                        indent: row.group-id == "" ? 0 : 1;
-                        active: row.tab.id == AppState.active-id;
-                    }
-                }
-            }
-        }
-
-        // 新建按钮行
+        // 顶部：应用标识 + 新建标签
         Rectangle {
             height: 40px;
+
             HorizontalLayout {
-                padding-left: 10px;
+                padding-left: 14px;
                 padding-right: 10px;
                 spacing: 6px;
-                alignment: start;
+                cross-axis-alignment: center;
 
-                Rectangle {
-                    width: 92px;
-                    height: 30px;
-                    border-radius: 7px;
-                    background: nt-ta.has-hover ? Theme.hover : Theme.active;
-
-                    nt-ta := TouchArea {
-                        clicked => { AppState.new-tab(""); }
-                    }
-
-                    HorizontalLayout {
-                        padding-left: 8px;
-                        spacing: 6px;
-                        Text {
-                            text: "＋";
-                            color: Theme.text-secondary;
-                            font-size: 14px;
-                            vertical-alignment: center;
-                        }
-                        Text {
-                            text: "新标签";
-                            color: Theme.text-secondary;
-                            font-size: 13px;
-                            vertical-alignment: center;
-                        }
-                    }
+                Text {
+                    text: "devkit";
+                    color: Theme.text;
+                    font-size: Theme.fs-body;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
                 }
 
-                Rectangle {
-                    width: 92px;
-                    height: 30px;
-                    border-radius: 7px;
-                    background: ng-ta.has-hover ? Theme.hover : Theme.active;
-
-                    ng-ta := TouchArea {
-                        clicked => { AppState.new-group(); }
-                    }
-
-                    HorizontalLayout {
-                        padding-left: 8px;
-                        spacing: 6px;
-                        Text {
-                            text: "▦";
-                            color: Theme.text-secondary;
-                            font-size: 12px;
-                            font-family: "Segoe UI Symbol";
-                            vertical-alignment: center;
-                        }
-                        Text {
-                            text: "新分组";
-                            color: Theme.text-secondary;
-                            font-size: 13px;
-                            vertical-alignment: center;
-                        }
-                    }
+                AppIconButton {
+                    icon: "\u{E710}";
+                    box: 26px;
+                    icon-size: 12px;
+                    clicked => { AppState.new-tab(""); }
                 }
             }
         }
 
-        // 底部操作条
-        Rectangle {
-            height: 44px;
-            HorizontalLayout {
-                padding-left: 10px;
-                padding-right: 10px;
-                spacing: 6px;
-                alignment: start;
+        // 标签列表（分组头 + 成员）
+        ListView {
+            vertical-stretch: 1;
+            x: 8px;
+            width: parent.width - 16px;
 
-                FooterButton {
-                    icon: "⚙";
+            for row in AppState.sidebar-rows: Rectangle {
+                width: parent.width;
+                height: row.kind == 0 ? 28px : 30px;
+
+                if row.kind == 0: GroupHeader { data: row; }
+                if row.kind == 1: TabRow {
+                    data: row.tab;
+                    indent: row.group-id == "" ? 0 : 1;
+                    color-index: row.color-index;
+                    active: row.tab.id == AppState.active-id;
+                }
+            }
+        }
+
+        // 新建入口
+        Rectangle {
+            height: 40px;
+
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                padding-bottom: 8px;
+                spacing: 6px;
+                cross-axis-alignment: center;
+
+                AppButton {
+                    label: "新标签";
+                    icon: "\u{E710}";
+                    kind: 3;
+                    horizontal-stretch: 1;
+                    clicked => { AppState.new-tab(""); }
+                }
+
+                AppIconButton {
+                    icon: "\u{E8F1}";
+                    box: 30px;
+                    icon-size: 13px;
+                    clicked => { AppState.new-group(); }
+                }
+            }
+        }
+
+        // 底部操作条：设置 / 防休眠 / 外观
+        Rectangle {
+            height: 38px;
+
+            HLine {}
+
+            HorizontalLayout {
+                height: 37px;
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 4px;
+                cross-axis-alignment: center;
+
+                AppIconButton {
+                    icon: "\u{E713}";
+                    box: 28px;
+                    icon-size: 14px;
                     clicked => { AppState.settings-opened(); }
                 }
-                FooterButton {
-                    icon: "☕";
-                    on: AppState.prevent-sleep;
+                AppIconButton {
+                    icon: "\u{E823}";
+                    box: 28px;
+                    icon-size: 14px;
+                    active: AppState.prevent-sleep;
                     clicked => { AppState.sleep-toggled(); }
                 }
-                FooterButton {
-                    icon: "◐";
+                AppIconButton {
+                    icon: Theme.dark ? "\u{E708}" : "\u{E793}";
+                    box: 28px;
+                    icon-size: 14px;
                     clicked => { AppState.appearance-cycled(); }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                Label {
+                    text: AppState.appearance-mode == 0 ? "跟随系统" : (AppState.appearance-mode == 1 ? "浅色" : "深色");
+                    size: Theme.fs-caption;
+                    role: 2;
                 }
             }
         }

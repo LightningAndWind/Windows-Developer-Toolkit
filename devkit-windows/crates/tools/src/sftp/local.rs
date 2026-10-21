@@ -54,6 +54,36 @@ impl SftpBackend for LocalBackend {
         Ok(())
     }
 
+    async fn read_chunk(&mut self, path: &str, offset: u64, len: u64) -> Result<Vec<u8>> {
+        use std::io::{Read, Seek, SeekFrom};
+        let mut f = std::fs::File::open(path)?;
+        f.seek(SeekFrom::Start(offset))?;
+        let mut buf = vec![0u8; len as usize];
+        let mut read = 0usize;
+        while read < buf.len() {
+            let n = f.read(&mut buf[read..])?;
+            if n == 0 {
+                break;
+            }
+            read += n;
+        }
+        buf.truncate(read);
+        Ok(buf)
+    }
+
+    async fn write_chunk(&mut self, path: &str, offset: u64, data: &[u8]) -> Result<()> {
+        use std::io::{Seek, SeekFrom, Write};
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(offset == 0)
+            .open(path)?;
+        f.seek(SeekFrom::Start(offset))?;
+        f.write_all(data)?;
+        f.flush()?;
+        Ok(())
+    }
+
     async fn mkdir(&mut self, path: &str) -> Result<()> {
         std::fs::create_dir_all(path)?;
         Ok(())

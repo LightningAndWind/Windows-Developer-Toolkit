@@ -64,6 +64,11 @@ export global AppState {
     in-out property <bool> rename-dialog-visible: false;
     in-out property <string> rename-input;
 
+    // 关闭确认（标签有未保存内容时）
+    in-out property <bool> confirm-visible: false;
+    in-out property <string> confirm-message: "";
+    in-out property <string> confirm-target: "";
+
     // 标签分组（M7）
     in-out property <[TabGroupData]> groups;
     in-out property <[SidebarRow]> sidebar-rows;
@@ -95,6 +100,7 @@ export global AppState {
     // 偏好镜像
     in-out property <bool> prevent-sleep: false;
     in-out property <int> appearance-mode: 0; // 0=跟随系统 1=浅色 2=深色
+    in-out property <int> ui-scale: 0;        // 0=跟随系统 1=110% 2=125% 3=150%
 
     // 运行工具（git / OpenSSH）状态与一键安装
     in-out property <bool> git-missing: false;
@@ -122,12 +128,15 @@ export global AppState {
     callback rename-requested(string);
     callback rename-confirm();
     callback rename-cancel();
+    callback confirm-close-yes();
+    callback confirm-close-no();
     callback settings-closed();
     callback settings-tab-changed(int);
     callback settings-row-deleted(string);
     callback settings-history-cleared();
     callback open-data-dir();
     callback set-appearance(int);
+    callback set-ui-scale(int);
     // 标签分组（M7）
     callback new-group();
     callback delete-group(string);

@@ -1,146 +1,171 @@
-﻿// 新标签页（Launcher）：工具卡片按分类展示 + 搜索过滤。
+﻿// Launcher（新建标签页）：搜索框 + 按分类排列的工具卡片。
 import { LineEdit } from "std-widgets.slint";
 import { Theme } from "../globals/Theme.slint";
 import { AppState, LauncherTool } from "../globals/AppState.slint";
+import { Label, SectionHeader, HLine, Panel } from "../components/Controls.slint";
 
 component ToolCard inherits Rectangle {
-    in property <LauncherTool> data;
-    callback open;
+    in property <LauncherTool> tool;
+    callback open();
 
-    height: 84px;
-    width: 236px;
-    border-radius: Theme.radius;
-    background: ta.has-hover ? Theme.hover : Theme.card-bg;
+    height: 66px;
+    border-radius: Theme.radius-lg;
     border-width: 1px;
-    border-color: Theme.divider;
+    border-color: Theme.border;
+    background: ta.has-hover ? Theme.hover : Theme.card-bg;
 
     ta := TouchArea {
-        mouse-cursor: MouseCursor.pointer;
         clicked => { root.open(); }
     }
 
     HorizontalLayout {
-        padding: 14px;
+        padding-left: 12px;
+        padding-right: 12px;
         spacing: 12px;
-        alignment: start;
+        cross-axis-alignment: center;
 
         Rectangle {
-            width: 40px;
-            height: 40px;
-            border-radius: 10px;
+            width: 36px;
+            height: 36px;
+            border-radius: Theme.radius-lg;
             background: Theme.accent-soft;
 
             Text {
-                text: data.icon;
-                font-size: 20px;
-                font-family: "Segoe UI Symbol";
+                text: root.tool.icon;
+                font-family: "Segoe MDL2 Assets";
+                font-size: 18px;
+                color: Theme.accent;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
         }
 
         VerticalLayout {
-            spacing: 3px;
-            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
 
             Text {
-                text: data.title;
+                text: root.tool.title;
+                font-size: Theme.fs-body;
                 font-weight: 600;
                 color: Theme.text;
-            }
-
-            Text {
-                text: data.subtitle;
-                font-size: 12px;
-                color: Theme.text-secondary;
-                overflow: elide;
+                vertical-alignment: center;
                 wrap: no-wrap;
+                overflow: elide;
+            }
+            Text {
+                text: root.tool.subtitle;
+                font-size: Theme.fs-caption;
+                color: Theme.text-secondary;
+                vertical-alignment: center;
+                wrap: word-wrap;
+                max-height: 32px;
+                // 限制副标题宽度：否则长副标题会把卡片撑宽，
+                // 两列卡片在窄窗口下会溢出窗口右边（第二列点不到）。
+                max-width: 360px;
             }
         }
     }
 }
 
-component SectionTitle inherits Text {
-    color: Theme.text-secondary;
-    font-size: 13px;
-    font-weight: 600;
+component ToolGroup inherits VerticalLayout {
+    in property <string> title: "";
+    in property <[LauncherTool]> tools;
+    callback open(string);
+
+    spacing: 6px;
+
+    if root.title != "": SectionHeader { text: root.title; }
+
+    GridLayout {
+        spacing: 8px;
+        for t in root.tools: ToolCard {
+            tool: t;
+            open => { root.open(t.id); }
+        }
+    }
 }
 
 export component Launcher inherits Rectangle {
-    background: Theme.bg;
+    background: Theme.content-bg;
+
     callback open-tool(string);
+    callback query-changed(string);
 
-    VerticalLayout {
-        padding: 36px;
-        padding-top: 44px;
-        spacing: 18px;
+    Flickable {
+        width: parent.width;
+        height: parent.height;
+        content-width: self.width;
+        content-height: body.preferred-height;
 
-        Text {
-            text: "devkit";
-            font-size: 30px;
-            font-weight: 700;
-            color: Theme.text;
-        }
+        body := VerticalLayout {
+            width: parent.width;
+            padding-top: 48px;
+            padding-bottom: 48px;
+            padding-left: max(24px, (parent.width - 900px) / 2);
+            padding-right: max(24px, (parent.width - 900px) / 2);
+            spacing: 16px;
 
-        Text {
-            text: "本地化开发者工具集 · 精简 · 快速 · 低内存";
-            color: Theme.text-secondary;
-            font-size: 13px;
-        }
-
-        LineEdit {
-            placeholder-text: "搜索工具";
-            edited(t) => { root.query-changed(t); }
-        }
-
-        Flickable {
-            VerticalLayout {
+            HorizontalLayout {
                 spacing: 12px;
+                cross-axis-alignment: center;
 
-                if AppState.tools-network.length > 0: SectionTitle { text: "网络"; }
-                HorizontalLayout {
-                    spacing: 12px;
-                    alignment: start;
-                    for t in AppState.tools-network: ToolCard {
-                        data: t;
-                        open => { root.open-tool(t.id); }
-                    }
+                Text {
+                    text: "\u{E90F}";
+                    font-family: "Segoe MDL2 Assets";
+                    font-size: 28px;
+                    color: Theme.accent;
+                    vertical-alignment: center;
                 }
-
-                if AppState.tools-terminal.length > 0: SectionTitle { text: "终端"; }
-                HorizontalLayout {
-                    spacing: 12px;
-                    alignment: start;
-                    for t in AppState.tools-terminal: ToolCard {
-                        data: t;
-                        open => { root.open-tool(t.id); }
-                    }
+                Text {
+                    text: "新建标签";
+                    font-size: 24px;
+                    font-weight: 600;
+                    color: Theme.text;
+                    vertical-alignment: center;
                 }
+            }
 
-                if AppState.tools-data.length > 0: SectionTitle { text: "数据"; }
-                HorizontalLayout {
-                    spacing: 12px;
-                    alignment: start;
-                    for t in AppState.tools-data: ToolCard {
-                        data: t;
-                        open => { root.open-tool(t.id); }
-                    }
+            LineEdit {
+                horizontal-stretch: 1;
+                height: 34px;
+                placeholder-text: "搜索工具…";
+                font-size: Theme.fs-body;
+                edited(t) => { root.query-changed(t); }
+                accepted => { root.query-changed(self.text); }
+            }
+
+            if AppState.tools-network.length > 0: ToolGroup {
+                title: "网络";
+                tools: AppState.tools-network;
+                open(id) => { root.open-tool(id); }
+            }
+            if AppState.tools-terminal.length > 0: ToolGroup {
+                title: "终端";
+                tools: AppState.tools-terminal;
+                open(id) => { root.open-tool(id); }
+            }
+            if AppState.tools-data.length > 0: ToolGroup {
+                title: "数据";
+                tools: AppState.tools-data;
+                open(id) => { root.open-tool(id); }
+            }
+            if AppState.tools-utility.length > 0: ToolGroup {
+                title: "实用工具";
+                tools: AppState.tools-utility;
+                open(id) => { root.open-tool(id); }
+            }
+
+            if AppState.tools-network.length == 0 && AppState.tools-terminal.length == 0
+                && AppState.tools-data.length == 0 && AppState.tools-utility.length == 0: Rectangle {
+                height: 120px;
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 6px;
+                    Label { text: "没有匹配的工具"; role: 1; horizontal-alignment: center; }
+                    Label { text: "换个关键词试试。"; role: 2; horizontal-alignment: center; }
                 }
-
-                if AppState.tools-utility.length > 0: SectionTitle { text: "实用工具"; }
-                HorizontalLayout {
-                    spacing: 12px;
-                    alignment: start;
-                    for t in AppState.tools-utility: ToolCard {
-                        data: t;
-                        open => { root.open-tool(t.id); }
-                    }
-                }
-
-                Rectangle { height: 12px; }
             }
         }
     }
-
-    callback query-changed(string);
 }

@@ -10,6 +10,7 @@ const SUBKEY: &str = r"Software\devkit";
 pub const KEY_SIDEBAR_WIDTH: &str = "sidebar_width";
 pub const KEY_APPEARANCE_MODE: &str = "appearance_mode"; // 0=跟随系统 1=浅色 2=深色
 pub const KEY_PREVENT_SLEEP: &str = "prevent_sleep";
+pub const KEY_UI_SCALE: &str = "ui_scale"; // 0=跟随系统 1=110% 2=125% 3=150%
 pub const KEY_DATA_DIR: &str = "data_dir";
 
 fn open_or_create() -> Result<RegKey> {

@@ -1,39 +1,94 @@
-// 设计令牌：对应 macOS 端 Theme.swift。深浅双态 + 度量。
+// 设计令牌：不再自造一套「macOS 风格」配色，而是直接复用 Slint 内置的 Fluent 风格
+// （Windows 10/11 原生外观）。所有颜色都从 std-widgets 的 Palette 派生，因此：
+//   · 深浅色跟随系统（Windows 设置 → 个性化 → 主题）；
+//   · 强调色跟随系统的「强调色」设置；
+//   · 应用内切换浅/深色时只需改 Palette.color-scheme，其余全部自动跟随。
+//
+// 约定：Theme 只做「语义命名」，不引入新的色值；所有尺寸单位为 px。
+import { Palette } from "std-widgets.slint";
+
 export global Theme {
+    // 当前是否深色。由 Rust 侧根据「外观模式」写入（跟随系统时读注册表 AppsUseLightTheme），
+    // 保证 Palette（标准控件）与自定义控件使用同一套判定。
     in-out property <bool> dark: false;
 
-    // 调色板（深色压暗、浅色偏净）
-    out property <color> bg: dark ? #1f1f22 : #f2f2f6;
-    out property <color> sidebar-bg: dark ? #232327 : #e8e8ee;
-    out property <color> content-bg: dark ? #1c1c1f : #ffffff;
-    out property <color> card-bg: dark ? #2a2a30 : #ffffff;
-    out property <color> text: dark ? #e9e9ee : #1c1c20;
-    out property <color> text-secondary: dark ? #98989f : #6c6c76;
-    out property <color> accent: #0a84ff;
-    out property <color> accent-soft: dark ? rgba(10, 132, 255, 0.16) : rgba(10, 132, 255, 0.10);
-    out property <color> divider: dark ? rgba(255, 255, 255, 0.07) : rgba(0, 0, 0, 0.08);
-    out property <color> hover: dark ? rgba(255, 255, 255, 0.06) : rgba(0, 0, 0, 0.05);
-    out property <color> active: dark ? rgba(255, 255, 255, 0.11) : rgba(0, 0, 0, 0.08);
-    out property <color> danger: #ff453a;
-    out property <color> warn: #ff9f0a;
-    out property <color> ok: #30d158;
+    // ===== 表面 =====
+    // 窗口 / 内容区底色
+    out property <color> bg: Palette.background;
+    // 侧栏等「次级表面」，比内容区略深/略浅
+    out property <color> surface: Palette.alternate-background;
+    // 内容区（工具视图）底色
+    out property <color> content-bg: Palette.background;
+    // 输入框 / 凹槽底
+    out property <color> field-bg: Palette.control-background;
+    // 卡片 / 浮层
+    out property <color> card-bg: Palette.background;
+    // 浮层（弹窗）底色
+    out property <color> overlay-bg: Palette.alternate-background;
 
-    // 度量（对应 Theme.Metrics）
+    // ===== 文字 =====
+    out property <color> text: Palette.foreground;
+    out property <color> text-secondary: dark ? #ffffffc9 : #00000099;
+    out property <color> text-tertiary: dark ? #ffffff8a : #00000073;
+    out property <color> text-disabled: dark ? #ffffff5e : #0000005e;
+    out property <color> on-accent: Palette.accent-foreground;
+
+    // ===== 强调 / 语义色 =====
+    out property <color> accent: Palette.accent-background;
+    out property <color> accent-foreground: Palette.accent-foreground;
+    out property <color> accent-soft: dark ? #ffffff14 : #0000000a;
+    out property <color> selection-bg: Palette.selection-background;
+    out property <color> selection-fg: Palette.selection-foreground;
+    out property <color> danger: #c42b1c;
+    out property <color> danger-soft: dark ? #c42b1c33 : #c42b1c1a;
+    out property <color> warn: #9d5d00;
+    out property <color> warn-soft: dark ? #f7630c33 : #f7630c1a;
+    out property <color> ok: #0f7b0f;
+    out property <color> ok-soft: dark ? #16c60c33 : #107c101a;
+    out property <color> info: #005fb8;
+
+    // ===== 分隔与交互态 =====
+    out property <color> divider: dark ? #ffffff14 : #00000014;
+    out property <color> border: Palette.border;
+    out property <color> hover: dark ? #ffffff0f : #00000008;
+    out property <color> pressed: dark ? #ffffff1f : #00000010;
+    out property <color> shadow: dark ? #00000042 : #00000024;
+
+    // 终端配色（与 Rust 侧 ANSI 调色板保持一致）
+    out property <color> terminal-bg: dark ? #181818 : #fcfcfd;
+    out property <color> terminal-fg: dark ? #dcdde4 : #222428;
+
+    // ===== 度量 =====
     out property <length> sidebar-min: 180px;
     out property <length> sidebar-max: 320px;
     out property <length> sidebar-default: 220px;
-    out property <length> radius: 8px;
+    out property <length> radius-sm: 4px;
+    out property <length> radius: 4px;
+    out property <length> radius-lg: 7px;
+    out property <length> control-h: 32px;
+    out property <length> row-h: 32px;
+    out property <length> section-h: 28px;
+    out property <length> toolbar-h: 44px;
+    out property <length> gap: 8px;
+    out property <length> pad: 12px;
+
+    // ===== 字体 =====
+    out property <length> fs-caption: 12px;
+    out property <length> fs-small: 13px;
+    out property <length> fs-body: 14px;
+    out property <length> fs-title: 16px;
+    out property <length> fs-mono: 13px;
 
     // 标签分组预设色（对应 macOS 端 TabGroup.GroupColor）
     public pure function group-color(i: int) -> color {
-        if (i == 0) { return #8e8e93; }
-        if (i == 1) { return #0a84ff; }
-        if (i == 2) { return #bf5af2; }
-        if (i == 3) { return #ff375f; }
-        if (i == 4) { return #ff453a; }
-        if (i == 5) { return #ff9f0a; }
-        if (i == 6) { return #ffd60a; }
-        if (i == 7) { return #30d158; }
-        return #64d2ff;
+        if (i == 0) { return #8a8a8a; }
+        if (i == 1) { return #0078d4; }
+        if (i == 2) { return #8764b8; }
+        if (i == 3) { return #e3008c; }
+        if (i == 4) { return #ca5010; }
+        if (i == 5) { return #c19c00; }
+        if (i == 6) { return #498205; }
+        if (i == 7) { return #038387; }
+        return #4f6bed;
     }
 }

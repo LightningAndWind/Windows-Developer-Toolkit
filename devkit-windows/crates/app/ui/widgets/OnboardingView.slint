@@ -1,103 +1,79 @@
 ﻿// 首次启动引导：选择数据目录（校验可写后才进入主界面）。
 import { Theme } from "../globals/Theme.slint";
 import { AppState } from "../globals/AppState.slint";
-
-component PrimaryButton inherits Rectangle {
-    in property <string> label;
-    callback clicked;
-
-    height: 34px;
-    min-width: 120px;
-    padding-left: 18px;
-    padding-right: 18px;
-    border-radius: 8px;
-    background: ta.has-hover ? #0a94ff : Theme.accent;
-
-    ta := TouchArea {
-        mouse-cursor: MouseCursor.pointer;
-        clicked => { root.clicked(); }
-    }
-
-    Text {
-        text: root.label;
-        color: #ffffff;
-        font-size: 13px;
-        font-weight: 600;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-}
-
-component SecondaryButton inherits Rectangle {
-    in property <string> label;
-    callback clicked;
-
-    height: 34px;
-    min-width: 120px;
-    padding-left: 18px;
-    padding-right: 18px;
-    border-radius: 8px;
-    background: ta.has-hover ? Theme.hover : Theme.active;
-    border-width: 1px;
-    border-color: Theme.divider;
-
-    ta := TouchArea {
-        mouse-cursor: MouseCursor.pointer;
-        clicked => { root.clicked(); }
-    }
-
-    Text {
-        text: root.label;
-        color: Theme.text;
-        font-size: 13px;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-}
+import { AppButton, Panel, Label } from "../components/Controls.slint";
 
 export component OnboardingView inherits Rectangle {
     background: Theme.bg;
 
     VerticalLayout {
         alignment: center;
-        spacing: 14px;
+        spacing: 0;
+        padding: 24px;
+
+        Text {
+            text: "\u{E90F}";
+            font-family: "Segoe MDL2 Assets";
+            font-size: 40px;
+            color: Theme.accent;
+            horizontal-alignment: center;
+        }
+
+        Rectangle { height: 12px; }
 
         Text {
             text: "欢迎使用 devkit";
             font-size: 26px;
-            font-weight: 700;
+            font-weight: 600;
             color: Theme.text;
             horizontal-alignment: center;
         }
 
-        Text {
-            text: "请选择数据存储目录\nHTTP 历史、SSH 连接配置、Git 仓库登记等将保存在该目录的 SQLite 数据库中";
-            color: Theme.text-secondary;
-            font-size: 13px;
+        Rectangle { height: 6px; }
+
+        Label {
+            text: "HTTP · SSH · SFTP · Git · JSON，一个窗口内的开发者工具箱";
+            role: 1;
+            size: Theme.fs-small;
             horizontal-alignment: center;
         }
 
-        Rectangle { height: 10px; }
+        Rectangle { height: 24px; }
 
-        HorizontalLayout {
-            alignment: center;
-            spacing: 12px;
+        Panel {
+            width: min(parent.width - 48px, 480px);
+            height: 196px;
 
-            PrimaryButton {
-                label: "选择目录…";
-                clicked => { AppState.choose-data-dir(); }
-            }
+            VerticalLayout {
+                padding: 24px;
+                spacing: 10px;
 
-            SecondaryButton {
-                label: "使用默认目录";
-                clicked => { AppState.use-default-dir(); }
+                Label { text: "选择数据目录"; strong: true; size: Theme.fs-title; }
+                Label {
+                    text: "HTTP 历史、SSH 连接配置、Git 仓库登记等将保存在该目录的 SQLite 数据库中。可随时在设置中查看。";
+                    role: 1;
+                    size: Theme.fs-small;
+                    wrap: word-wrap;
+                }
+
+                Rectangle { vertical-stretch: 1; }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: end;
+
+                    AppButton { label: "使用默认目录"; clicked => { AppState.use-default-dir(); } }
+                    AppButton { label: "选择目录…"; icon: "\u{E8B7}"; kind: 1; clicked => { AppState.choose-data-dir(); } }
+                }
             }
         }
 
-        Text {
+        Rectangle { height: 12px; }
+
+        Label {
             text: AppState.onboarding-error;
             color: Theme.danger;
-            font-size: 12px;
+            size: Theme.fs-small;
             horizontal-alignment: center;
             visible: AppState.onboarding-error != "";
         }

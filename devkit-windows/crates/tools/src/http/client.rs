@@ -79,7 +79,11 @@ pub async fn send_async(
     }
 
     let started = Instant::now();
-    let mut resp = match builder.send().await {
+    // 等待响应头时也要能取消：服务器迟迟不回首字节时，「停止」应立刻生效
+    let mut resp = match tokio::select! {
+        r = builder.send() => r,
+        _ = watch_cancel(&cancel) => return Err(SendError::Cancelled),
+    } {
         Ok(r) => r,
         Err(e) => {
             if cancel.load(Ordering::Relaxed) {

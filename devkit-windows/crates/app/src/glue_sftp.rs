@@ -2,18 +2,17 @@
 
 use crate::shell::{current_window, Ctx};
 use crate::{SftpRow, SftpUI, SshTreeNode};
-use devkit_core::tool::ids;
 use devkit_tools::http::client::runtime;
 use devkit_tools::sftp::backend::SftpBackend;
 use devkit_tools::sftp::local::LocalBackend;
 use devkit_tools::sftp::remote::RemoteBackend;
-use devkit_tools::sftp::transport::{self, TransferEvent, TransferItem};
-use slint::{ComponentHandle, Model, ModelRc, VecModel};
+use devkit_tools::sftp::transport::{self, TransferItem};
+use slint::{ComponentHandle, ModelRc, VecModel};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 /// 一侧面板状态。
 pub struct Panel {
@@ -40,11 +39,13 @@ pub struct SftpRun {
     pub pending_items: Option<Vec<PendingItem>>,
 }
 
-/// 待传条目（含来源侧标记）。
+/// 待传条目（含来源侧标记与已传字节数）。
 #[derive(Debug, Clone)]
 pub struct PendingItem {
     pub item: TransferItem,
     pub src_is_left: bool,
+    /// 该文件已传输的字节数（分块传输时用于续传）。
+    pub done: u64,
 }
 
 impl Default for SftpRun {
@@ -243,9 +244,12 @@ pub fn wire_sftp_callbacks(ctx: Rc<Ctx>) {
             let rt = runtime();
             {
                 side_panel!(side as u8, &ctx2, panel);
+                if panel.backend.is_none() {
+                    return;
+                }
                 for name in &names {
                     let p = transport::join_path(&path, name);
-                    let backend = panel.backend.as_mut().unwrap();
+                    let Some(backend) = panel.backend.as_mut() else { break };
                     let is_dir = rt.block_on(backend.is_dir(&p)).unwrap_or(false);
                     let r = if is_dir {
                         rt.block_on(backend.remove_dir_recursive(&p))
@@ -253,9 +257,10 @@ pub fn wire_sftp_callbacks(ctx: Rc<Ctx>) {
                         rt.block_on(backend.remove_file(&p))
                     };
                     if let Err(e) = r {
-                         if let Some(w_g) = current_window() {
-                         let s = w_g.global::<SftpUI>();
-                            set_hud(&s, true, "删除失败", &format!("{e}"), 0.0);
+                        if let Some(w_g) = current_window() {
+                            let s = w_g.global::<SftpUI>();
+                            set_hud(&s, true, "删除失败", "", 0.0);
+                            s.set_hud_error(format!("{e}").into());
                         }
                     }
                 }
@@ -280,6 +285,9 @@ fn set_hud(ui: &SftpUI, visible: bool, line1: &str, line2: &str, progress: f32) 
     ui.set_hud_line1(line1.into());
     ui.set_hud_line2(line2.into());
     ui.set_hud_progress(progress);
+    if visible {
+        ui.set_hud_error("".into());
+    }
 }
 
 fn parent_of(path: &str) -> String {
@@ -316,7 +324,7 @@ fn connect_profile(ctx: &Rc<Ctx>, side: u8, profile_id: &str) {
         .await
     });
     match result {
-        Ok(mut remote) => {
+        Ok(remote) => {
             let home = runtime().block_on(remote.canonical_home());
             let mut runs = ctx.sftp_runs.borrow_mut();
             let Some(run) = runs.get_mut(active.as_str()) else { return };
@@ -337,7 +345,7 @@ fn connect_profile(ctx: &Rc<Ctx>, side: u8, profile_id: &str) {
 }
 
 /// 刷新面板列表。
-fn refresh_panel(ctx: &Rc<Ctx>, panel: &mut Panel, side: i32, new_path: Option<String>) {
+fn refresh_panel(_ctx: &Rc<Ctx>, panel: &mut Panel, side: i32, new_path: Option<String>) {
     if panel.backend.is_none() {
         return;
     }
@@ -539,7 +547,7 @@ fn start_transfer(ctx: &Rc<Ctx>, from: u8) {
         run.pending_items = Some(
             items
                 .iter()
-                .map(|i| PendingItem { item: i.clone(), src_is_left: from == 1 })
+                .map(|i| PendingItem { item: i.clone(), src_is_left: from == 1, done: 0 })
                 .collect(),
         );
     }
@@ -601,19 +609,46 @@ fn drive_transfer(ctx: &Rc<Ctx>, tab_id: &str) {
                 } else {
                     (&mut run.right, &mut run.left)
                 };
+                if a.backend.is_none() || b.backend.is_none() {
+                    items.remove(0);
+                    return;
+                }
                 let rt = runtime();
+                // 分块传输：每次搬运 CHUNK 字节，大文件不会整份读进内存。
+                const CHUNK: u64 = 1024 * 1024;
+                let size = item.item.size;
+                let offset = item.done;
                 let r = rt.block_on(async {
-                    let data = a.backend.as_mut().unwrap().read_file(&item.item.src_path).await?;
-                    b.backend.as_mut().unwrap().write_file(&item.item.dst_path, &data).await?;
+                    let remaining = size.saturating_sub(offset);
+                    if remaining == 0 {
+                        return Ok::<(), anyhow::Error>(());
+                    }
+                    let want = CHUNK.min(remaining);
+                    let data = a.backend.as_mut().unwrap().read_chunk(&item.item.src_path, offset, want).await?;
+                    if data.is_empty() {
+                        return Ok(());
+                    }
+                    b.backend.as_mut().unwrap().write_chunk(&item.item.dst_path, offset, &data).await?;
                     Ok::<(), anyhow::Error>(())
                 });
-                if let Some(done) = run.done_bytes.as_ref() {
-                    done.fetch_add(item.item.size, Ordering::Relaxed);
-                }
-                items.remove(0);
                 match r {
-                    Ok(()) => format!("done-file:{}", item.item.src_path),
-                    Err(e) => format!("err:{}:{}", item.item.src_path, e),
+                    Ok(()) => {
+                        let moved = size.saturating_sub(offset).min(CHUNK);
+                        items[0].done = offset + moved;
+                        if let Some(done) = run.done_bytes.as_ref() {
+                            done.fetch_add(moved, Ordering::Relaxed);
+                        }
+                        if items[0].done >= size {
+                            items.remove(0);
+                            format!("done-file:{}", item.item.src_path)
+                        } else {
+                            format!("copy:{}", item.item.src_path)
+                        }
+                    }
+                    Err(e) => {
+                        items.remove(0);
+                        format!("err:{}:{}", item.item.src_path, e)
+                    }
                 }
             }
         }
@@ -625,7 +660,16 @@ fn drive_transfer(ctx: &Rc<Ctx>, tab_id: &str) {
         if let Some(run) = runs.get(tab_id) {
             let done = run.done_bytes.as_ref().map(|d| d.load(Ordering::Relaxed)).unwrap_or(0);
             let total = run.total_bytes.max(1);
-            set_hud(&sftp_ui, true, "传输中…", &step, done as f32 / total as f32);
+            if step == "done" {
+                // 传输结束：隐藏进度条并给出结果提示
+                set_hud(&sftp_ui, false, "", "", 0.0);
+            } else if let Some(err) = step.strip_prefix("err:") {
+                let msg = err.split_once(':').map(|(_, e)| e).unwrap_or(err);
+                set_hud(&sftp_ui, true, "传输失败", "", 0.0);
+                sftp_ui.set_hud_error(msg.to_string().into());
+            } else {
+                set_hud(&sftp_ui, true, "传输中…", &step, done as f32 / total as f32);
+            }
         }
     }
 }

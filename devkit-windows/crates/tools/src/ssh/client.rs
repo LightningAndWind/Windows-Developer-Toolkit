@@ -148,16 +148,23 @@ impl SshTerminal {
 
     /// 输出喂给监视器，返回应注入的自动应答字节。
     pub fn on_output(&mut self, chunk: &[u8]) -> Vec<u8> {
-        if self.state == SSHConnectionState::Connecting {
-            let text = String::from_utf8_lossy(chunk);
-            if text.contains("Permission denied") {
-                self.state = SSHConnectionState::Failed("认证被拒绝".into());
-            } else if self.watcher.password_typed || self.watcher.trust_answered {
-                // 已输入密码，视作进入 shell
-                self.state = SSHConnectionState::Connected(self.watcher_summary());
-            }
+        let inject = self.watcher.on_output(chunk);
+        // 用监视器的滚动缓冲做整段判断：ssh 的报错可能跨 chunk 到达。
+        let buf = String::from_utf8_lossy(&self.watcher.buf).to_lowercase();
+
+        if let Some(reason) = classify_failure(&buf) {
+            self.state = SSHConnectionState::Failed(reason.to_string());
+        } else if let Some(reason) = classify_closed(&buf) {
+            self.state = SSHConnectionState::Disconnected;
+            let _ = reason;
+        } else if self.state == SSHConnectionState::Connecting
+            && (self.watcher.password_typed || self.watcher.trust_answered)
+            && !buf.trim().is_empty()
+        {
+            // 已应答认证提示且没有失败输出：视为进入 shell。
+            self.state = SSHConnectionState::Connected(self.watcher_summary());
         }
-        self.watcher.on_output(chunk)
+        inject
     }
 
     fn watcher_summary(&self) -> String {
@@ -173,4 +180,41 @@ impl SshTerminal {
     pub fn mark_disconnected(&mut self) {
         self.state = SSHConnectionState::Disconnected;
     }
+}
+
+/// 把 OpenSSH 的典型报错映射为可读的中文原因。
+fn classify_failure(buf: &str) -> Option<&'static str> {
+    if buf.contains("permission denied") {
+        return Some("认证失败：用户名、密码或私钥不正确");
+    }
+    if buf.contains("connection timed out") || buf.contains("operation timed out") {
+        return Some("连接超时：主机或端口不可达");
+    }
+    if buf.contains("connection refused") {
+        return Some("连接被拒绝：目标端口未开放");
+    }
+    if buf.contains("could not resolve hostname") {
+        return Some("无法解析主机名");
+    }
+    if buf.contains("no route to host") || buf.contains("network is unreachable") {
+        return Some("网络不可达");
+    }
+    if buf.contains("host key verification failed") {
+        return Some("主机密钥校验失败");
+    }
+    if buf.contains("too many authentication failures") {
+        return Some("认证失败次数过多");
+    }
+    if buf.contains("connection reset by peer") {
+        return Some("连接被对端重置");
+    }
+    None
+}
+
+/// 服务器/客户端主动关闭连接：属于「已结束」而不是配置错误。
+fn classify_closed(buf: &str) -> Option<&'static str> {
+    if buf.contains("connection closed by") || buf.contains("connection to") && buf.contains("closed") {
+        return Some("连接已关闭");
+    }
+    None
 }

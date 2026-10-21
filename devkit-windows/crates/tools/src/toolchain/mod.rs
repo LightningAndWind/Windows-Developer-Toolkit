@@ -172,7 +172,7 @@ pub fn ssh_keygen() -> String {
 
 /// git 可用性（--version 探测）。
 pub fn git_available() -> bool {
-    std::process::Command::new(git())
+    crate::proc::cmd(git())
         .arg("--version")
         .output()
         .map(|o| o.status.success())
@@ -182,7 +182,7 @@ pub fn git_available() -> bool {
 /// ssh 可用性。Windows OpenSSH 的 `-V` 把版本串直接写控制台（重定向拿不到）且退出码 255，
 /// 因此以「能成功启动且非缺 DLL 崩溃」为判据：启动失败或 STATUS_DLL_NOT_FOUND 才判不可用。
 pub fn ssh_available() -> bool {
-    match std::process::Command::new(ssh()).arg("-V").output() {
+    match crate::proc::cmd(ssh()).arg("-V").output() {
         Ok(o) => o.status.code().map(|c| c as u32) != Some(0xC0000135),
         Err(_) => false,
     }

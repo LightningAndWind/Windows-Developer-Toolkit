@@ -83,7 +83,9 @@ impl TermFrame {
     }
 }
 
-/// 把一行 cells 合并为同色跨段；行内光标格做反色。
+/// 把一行 cells 合并为同色跨段；同时记录每段的起始列与覆盖单元格数，
+/// UI 侧据此按 char-width 做像素级定位（等宽字体下与网格严格对齐）。
+/// 行内光标格做反色。
 fn build_row(cells: &[Cell], pal: &AnsiPalette, cursor_col: Option<usize>) -> TermLine {
     let mut spans: Vec<TermSpan> = Vec::new();
     // 找最后一个非空（无背景无内容）格，截断尾部空白
@@ -100,30 +102,41 @@ fn build_row(cells: &[Cell], pal: &AnsiPalette, cursor_col: Option<usize>) -> Te
 
     struct Cur {
         text: String,
+        start: usize,
+        cells: usize,
         fg: Option<Color>,
         bg: Option<Color>,
         bold: bool,
         underline: bool,
     }
     fn flush(cur: &mut Cur, out: &mut Vec<TermSpan>) {
-        if !cur.text.is_empty() {
+        if cur.cells > 0 {
             out.push(TermSpan {
                 text: SharedString::from(cur.text.clone()),
                 fg: cur.fg.unwrap_or(Color::from_rgb_u8(0, 0, 0)),
                 bg: cur.bg.unwrap_or(Color::from_argb_encoded(0)),
+                start: cur.start as i32,
+                cells: cur.cells as i32,
                 bold: cur.bold,
                 underline: cur.underline,
             });
         }
         cur.text.clear();
+        cur.cells = 0;
     }
 
-    let mut cur = Cur { text: String::new(), fg: None, bg: None, bold: false, underline: false };
+    let mut cur = Cur {
+        text: String::new(),
+        start: 0,
+        cells: 0,
+        fg: None,
+        bg: None,
+        bold: false,
+        underline: false,
+    };
 
     for (i, cell) in cells[..end].iter().enumerate() {
-        if cell.attrs & ATTR_WIDE_CONT != 0 {
-            continue; // 宽字符续格不单独渲染
-        }
+        let wide_cont = cell.attrs & ATTR_WIDE_CONT != 0;
         // 解析颜色（含反色与光标反色）
         let cursor_here = cursor_col == Some(i);
         let mut fg = resolve_fg(cell.fg, pal);
@@ -145,16 +158,23 @@ fn build_row(cells: &[Cell], pal: &AnsiPalette, cursor_col: Option<usize>) -> Te
         });
         let bg = bg.unwrap_or(Color::from_argb_encoded(0));
 
-        let same_style = cur.fg == Some(fg) && cur.bg == Some(bg) && cur.bold == bold
+        let same_style = cur.cells > 0
+            && cur.fg == Some(fg)
+            && cur.bg == Some(bg)
+            && cur.bold == bold
             && cur.underline == underline;
         if !same_style {
             flush(&mut cur, &mut spans);
+            cur.start = i;
             cur.fg = Some(fg);
             cur.bg = Some(bg);
             cur.bold = bold;
             cur.underline = underline;
         }
-        cur.text.push(cell.ch);
+        cur.cells += 1;
+        if !wide_cont {
+            cur.text.push(cell.ch);
+        }
     }
     flush(&mut cur, &mut spans);
 

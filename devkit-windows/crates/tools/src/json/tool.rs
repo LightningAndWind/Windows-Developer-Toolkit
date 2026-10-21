@@ -72,6 +72,20 @@ impl JsonTool {
         walk(&root, String::new(), 0, &[], expanded, &mut out);
         Some(out)
     }
+
+    /// 按索引路径取节点（路径来自 flatten_tree，用于「复制该节点」）。
+    pub fn value_at(&self, path: &[usize]) -> Option<JsonValue> {
+        let root = self.parse().ok()?;
+        let mut cur = &root;
+        for idx in path {
+            cur = match cur {
+                JsonValue::Array(items) => items.get(*idx)?,
+                JsonValue::Object(entries) => &entries.get(*idx)?.1,
+                _ => return None,
+            };
+        }
+        Some(cur.clone())
+    }
 }
 
 fn walk(

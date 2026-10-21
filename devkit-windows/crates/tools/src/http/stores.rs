@@ -266,8 +266,16 @@ pub fn upsert_request(db: &Database, id: Option<&str>, folder_id: Option<&str>, 
     }
 }
 
-pub fn get_request(db: &Database, id: &str) -> Result<Option<RequestRow>> {
-    let rows: Vec<(Option<String>, String, f64, Vec<u8>)> = db.query(
+/// 重命名已保存的请求（只改名称，保留请求体）。
+pub fn rename_request(db: &Database, id: &str, name: &str) -> Result<()> {
+    db.run(
+        "UPDATE http_requests SET name = ?2, updated_at = ?3 WHERE id = ?1;",
+        &params![id, name, now()],
+    )?;
+    Ok(())
+}
+
+pub fn get_request(db: &Database, id: &str) -> Result<Option<RequestRow>> {    let rows: Vec<(Option<String>, String, f64, Vec<u8>)> = db.query(
         "SELECT folder_id, name, updated_at, request_json FROM http_requests WHERE id = ?1;",
         &params![id],
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),

@@ -1,5 +1,8 @@
 //! 工具注册协议：所有工具实现统一接口，Shell 只负责装配。
 //! 对应 macOS 端 `ToolProtocol.swift`。
+//!
+//! 说明：各工具的运行时状态由 app crate 的 `*Run` 结构体承载（见 glue_*.rs），
+//! 会话快照的序列化也放在那里；本模块只保留与 UI 无关的静态描述与分类。
 
 /// 工具分类（Launcher 分组展示）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -42,8 +45,11 @@ pub struct ToolDescriptor {
     pub allows_multiple_instances: bool,
 }
 
-/// 工具运行时接口。Rust 侧以 `ToolInstance` 枚举承载具体实现，
-/// 本 trait 定义共享能力（保存/脏标记/生命周期/会话持久化）。
+/// 工具运行时接口。
+///
+/// 保留给后续把各工具运行时统一到 trait 之下用；当前实现直接使用 app crate 里的
+/// `JsonRun / HttpRun / SshRun / SftpRun / GitRun`，因此本 trait 暂未接线。
+#[allow(dead_code)]
 pub trait Tool {
     /// 动态标签标题；返回 None 时 Shell 使用 descriptor.title。
     fn dynamic_title(&self) -> Option<String> {

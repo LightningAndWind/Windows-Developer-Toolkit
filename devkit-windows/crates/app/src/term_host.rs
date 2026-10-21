@@ -36,7 +36,7 @@ pub fn encode_key(text: &str, ctrl: bool, alt: bool) -> Vec<u8> {
         "\u{f70d}" => return csi_tilde(21),              // F10
         "\u{f70e}" => return csi_tilde(23),              // F11
         "\u{f70f}" => return csi_tilde(24),              // F12
-        "\r" | "\u{f719}" => return vec![0x0d],
+        "\r" | "\n" | "\u{f719}" => return vec![0x0d],
         "\u{8}" | "\u{7f}" => return vec![0x7f],
         "\u{1b}" => return vec![0x1b],
         "\t" => return vec![0x09],

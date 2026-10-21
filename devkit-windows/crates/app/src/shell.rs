@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 /// JSON 标签运行时。
-struct JsonRun {
+pub struct JsonRun {
     tool: JsonTool,
     /// 树形展开集合（路径）。
     expanded: HashSet<Vec<usize>>,
@@ -46,6 +46,11 @@ pub struct Ctx {
     pub groups: RefCell<Vec<TabGroupSnapshot>>,
     pub json_debounce: RefCell<Option<slint::Timer>>,
     pub status_timer: RefCell<Option<slint::Timer>>,
+    /// Git 后台线程 → UI 的消息通道。
+    pub git_chan: RefCell<Option<crossbeam_channel::Sender<crate::glue_git::GitMsg>>>,
+    pub git_rx: RefCell<Option<crossbeam_channel::Receiver<crate::glue_git::GitMsg>>>,
+    /// 轮询 Git 后台消息的定时器。
+    pub git_timer: RefCell<Option<slint::Timer>>,
     pub active: RefCell<String>,
 }
 
@@ -62,6 +67,9 @@ impl Ctx {
             groups: RefCell::new(Vec::new()),
             json_debounce: RefCell::new(None),
             status_timer: RefCell::new(None),
+            git_chan: RefCell::new(None),
+            git_rx: RefCell::new(None),
+            git_timer: RefCell::new(None),
             active: RefCell::new(String::new()),
         }
     }
@@ -85,6 +93,46 @@ thread_local! {
     static RENAME_TARGET: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
+/// 更新标签的「未保存」标记（侧栏圆点）。
+pub fn set_tab_dirty(ctx: &Rc<Ctx>, id: &str, dirty: bool) {
+    let model = tabs_model_handle();
+    for i in 0..model.row_count() {
+        if let Some(mut t) = model.row_data(i) {
+            if t.id.as_str() == id {
+                if t.dirty != dirty {
+                    t.dirty = dirty;
+                    model.set_row_data(i, t);
+                    if let Some(ui) = current_window() {
+                        rebuild_sidebar(ctx, &ui);
+                    }
+                }
+                break;
+            }
+        }
+    }
+}
+
+/// 标签是否有未保存内容（当前仅 HTTP 工具）。
+pub fn tab_has_unsaved(ctx: &Rc<Ctx>, id: &str) -> bool {
+    ctx.http_runs
+        .borrow()
+        .get(id)
+        .map(|r| r.dirty)
+        .unwrap_or(false)
+}
+
+/// 请求关闭标签：若有未保存内容则先弹确认框。
+fn request_close_tab(ui: &MainWindow, ctx: &Rc<Ctx>, id: &str) {
+    if tab_has_unsaved(ctx, id) {
+        let state = ui.global::<AppState>();
+        state.set_confirm_target(id.into());
+        state.set_confirm_message("该标签有未保存的内容，关闭后这些修改将丢失。".into());
+        state.set_confirm_visible(true);
+        return;
+    }
+    close_tab_impl(ui, ctx, id);
+}
+
 /// 关闭标签的公共实现（on_close_tab / Ctrl+W 共用）。
 fn close_tab_impl(ui: &MainWindow, ctx: &Rc<Ctx>, id: &str) {
     let state = ui.global::<AppState>();
@@ -93,6 +141,7 @@ fn close_tab_impl(ui: &MainWindow, ctx: &Rc<Ctx>, id: &str) {
     ctx.json_runs.borrow_mut().remove(id);
     ctx.http_runs.borrow_mut().remove(id);
     ctx.sftp_runs.borrow_mut().remove(id);
+    ctx.git_runs.borrow_mut().remove(id);
     {
         let mut runs = ctx.ssh_runs.borrow_mut();
         if let Some(run) = runs.remove(id) {
@@ -266,7 +315,7 @@ fn rebuild_sidebar(ctx: &Rc<Ctx>, ui: &MainWindow) {
                     rows.push(crate::SidebarRow {
                         kind: 1,
                         name: "".into(),
-                        color_index: 0,
+                        color_index,
                         collapsed: false,
                         group_id: g.id.to_string().into(),
                         tab: td.clone(),
@@ -293,6 +342,195 @@ fn rebuild_sidebar(ctx: &Rc<Ctx>, ui: &MainWindow) {
 }
 
 pub fn run_app() -> Result<()> {
+    let (ui, ctx) = setup()?;
+    // ---- 运行 ----
+    // 先显示窗口：preferred-size 要等窗口映射后才落到 winit，此时尺寸才可读可改。
+    ui.show()?;
+    {
+        // 窗口映射、首帧渲染完成前 size() 恒为 0，这里等事件循环稳定后再收敛。
+        let weak = ui.as_weak();
+        slint::Timer::single_shot(std::time::Duration::from_millis(250), move || {
+            if weak.upgrade().is_some() {
+                clamp_window_to_workarea();
+            }
+        });
+    }
+    let result = ui.run();
+
+    // 退出前保存会话
+    if ctx.db.borrow().is_some() {
+        save_session(&ctx);
+    }
+    result?;
+    Ok(())
+}
+
+/// 无头渲染平台：用 Slint 软件渲染器把窗口画到内存缓冲里。
+struct ScreenshotPlatform {
+    window: Rc<slint::platform::software_renderer::MinimalSoftwareWindow>,
+    buffer: Rc<RefCell<Option<slint::SharedPixelBuffer<slint::Rgb8Pixel>>>>,
+}
+
+impl slint::platform::Platform for ScreenshotPlatform {
+    fn create_window_adapter(
+        &self,
+    ) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::platform::PlatformError> {
+        Ok(self.window.clone())
+    }
+
+    fn run_event_loop(&self) -> Result<(), slint::platform::PlatformError> {
+        // 走 Slint 的定时器/动画驱动，而不是自己 sleep：
+        // 否则界面里的定时器（终端喂数据、Git 轮询、Toast 等）根本不会触发，
+        // 无头截图只能拿到静态首帧，测不出任何交互行为。
+        let window = self.window.clone();
+        let buffer = self.buffer.clone();
+        // DEVKIT_SHOT_MS：截图模式运行时长（默认 2.5 秒），便于等更慢的启动过程。
+        let run_ms = std::env::var("DEVKIT_SHOT_MS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .unwrap_or(2500);
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_millis(run_ms);
+        let mut size = (0u32, 0u32);
+        while std::time::Instant::now() < deadline {
+            // 触发定时器 / 动画 / 属性变更回调（必须在渲染前）。
+            slint::platform::update_timers_and_animations();
+
+            // 尺寸变化时重建缓冲。
+            let sz = window.size();
+            if sz.width > 0 && sz.height > 0 {
+                let (w, h) = (sz.width as u32, sz.height as u32);
+                if size != (w, h) {
+                    size = (w, h);
+                    *buffer.borrow_mut() =
+                        Some(slint::SharedPixelBuffer::<slint::Rgb8Pixel>::new(w, h));
+                }
+            }
+
+            // 画一帧。
+            {
+                let mut buf = buffer.borrow_mut();
+                if let Some(b) = buf.as_mut() {
+                    let stride = b.width() as usize;
+                    window.draw_if_needed(|renderer| {
+                        let _ = renderer.render(b.make_mut_slice(), stride);
+                    });
+                }
+            }
+
+            // 等下一个定时器（最多一帧 16ms）。
+            let wait = slint::platform::duration_until_next_timer_update()
+                .unwrap_or(std::time::Duration::from_millis(16))
+                .min(std::time::Duration::from_millis(16));
+            std::thread::sleep(wait);
+        }
+        Ok(())
+    }
+}
+
+/// 无头渲染一张界面截图（排障 / 文档 / 回归测试用）。
+///
+/// 用 Slint 的软件渲染器离屏渲染，不需要桌面会话，
+/// 因此可以在没有显示器的环境（CI / 远程 shell）里检查界面排版。
+/// 期间跑的是真实事件循环（定时器、回调都会触发），所以截到的是
+/// 「应用运行 2.5 秒后」的画面，而不只是静态首帧。
+pub fn screenshot(path: &str) -> Result<()> {
+    use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
+
+    // 排障/测试模式：不写会话快照，别动用户已保存的标签。
+    NO_SESSION_SAVE.with(|c| *c.borrow_mut() = true);
+
+    let msw = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+    let buffer: Rc<RefCell<Option<slint::SharedPixelBuffer<slint::Rgb8Pixel>>>> =
+        Rc::new(RefCell::new(None));
+    let platform = ScreenshotPlatform {
+        window: msw.clone(),
+        buffer: buffer.clone(),
+    };
+    slint::platform::set_platform(Box::new(platform))
+        .map_err(|e| anyhow::anyhow!("设置软件渲染平台失败：{e}"))?;
+
+    let (ui, ctx) = setup()?;
+    ui.show()?;
+    // 窗口显示后再设置尺寸，确保适配器拿到正确的物理尺寸。
+    ui.window().set_size(slint::PhysicalSize::new(1400, 900));
+    msw.set_size(slint::PhysicalSize::new(1400, 900));
+    // DEVKIT_SHOT_TOOL=http|ssh|sftp|git|json|launcher|settings：截图前切到指定界面。
+    let shot = std::env::var("DEVKIT_SHOT_TOOL").unwrap_or_default();
+    if shot == "dark" {
+        let theme = ui.global::<Theme>();
+        theme.set_dark(true);
+    } else if shot == "launcher" {
+        ui.global::<AppState>().invoke_new_tab("".into());
+    } else if shot == "settings" {
+        ui.global::<AppState>().invoke_settings_opened();
+    } else if !shot.is_empty() {
+        ui.global::<AppState>().invoke_new_tab(shot.as_str().into());
+    }
+    // DEVKIT_SHOT_REPO=<路径>：登记并打开一个 Git 仓库（验证工作台排版）。
+    if let Ok(repo) = std::env::var("DEVKIT_SHOT_REPO") {
+        if !repo.is_empty() {
+            crate::glue_git::register_and_open(&ctx, &repo);
+        }
+    }
+    // DEVKIT_SHOT_HTTP_TAB=<0..5>：切到 HTTP 工具的某个分区。
+    if let Ok(tab) = std::env::var("DEVKIT_SHOT_HTTP_TAB") {
+        if let Ok(idx) = tab.parse::<i32>() {
+            ui.global::<HttpUI>().set_editor_tab(idx);
+        }
+    }
+    // DEVKIT_SHOT_HTTP_AUTH=<0|1|2>[,<0|1|2>...]：切换 HTTP 认证方式（回归测试用）。
+    // 认证方式下拉框 → 触发 on_auth_kind_changed → 曾经因 RefCell 重复借出而闪退。
+    for kind in env_list("DEVKIT_SHOT_HTTP_AUTH") {
+        ui.global::<HttpUI>().invoke_auth_kind_changed(kind);
+    }
+    // DEVKIT_SHOT_HTTP_BODY=<0..3>[,...]：切换 HTTP Body 类型（回归测试用，同上）。
+    for kind in env_list("DEVKIT_SHOT_HTTP_BODY") {
+        ui.global::<HttpUI>().invoke_body_kind_changed(kind);
+    }
+    // DEVKIT_SHOT_HTTP_TIMEOUT=<次数>：切换 HTTP 空闲超时档位（回归测试用，同上）。
+    for _ in env_list("DEVKIT_SHOT_HTTP_TIMEOUT") {
+        ui.global::<HttpUI>().invoke_timeout_cycled();
+    }
+    // DEVKIT_SHOT_SSH_LOCAL=1：打开本地终端并执行一条多行输出命令（回归测试用）。
+    // 配合截图可验证「终端新输出自动贴底」：截图里应看到命令的最后几行而不是开头。
+    if std::env::var("DEVKIT_SHOT_SSH_LOCAL").is_ok() {
+        crate::glue_ssh::connect_local(&ctx);
+        let ui_weak = ui.as_weak();
+        // shell 启动需要时间：等一会儿再发命令（DEVKIT_SHOT_MS 可延长总时长）。
+        let run_ms = std::env::var("DEVKIT_SHOT_MS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .unwrap_or(2500);
+        let delay = (run_ms / 2).clamp(800, 2500);
+        slint::Timer::single_shot(std::time::Duration::from_millis(delay), move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let tv = ui.global::<crate::TermHostUI>();
+            tv.invoke_send_key("1..60 | % { \"line $_\" }\r".into(), false, false, false);
+        });
+    }
+    // 事件循环在 ScreenshotPlatform::run_event_loop 里跑完（渲染若干帧后返回）。
+    let _ = ui.run();
+
+    let buffer = buffer.borrow().clone();
+    let Some(buffer) = buffer else {
+        anyhow::bail!("没有渲染出任何画面");
+    };
+    let (w, h) = (buffer.width(), buffer.height());
+    let mut img = image::RgbImage::new(w, h);
+    for (dst, src) in img.pixels_mut().zip(buffer.as_slice().iter()) {
+        dst[0] = src.r;
+        dst[1] = src.g;
+        dst[2] = src.b;
+    }
+    img.save(path).map_err(|e| anyhow::anyhow!("保存截图失败：{e}"))?;
+    Ok(())
+}
+
+/// 构建主窗口与共享上下文（不进入事件循环）。
+fn setup() -> Result<(MainWindow, Rc<Ctx>)> {
+    // Slint 只在启动时读取缩放覆盖值，必须在创建窗口之前设置。
+    apply_ui_scale();
     let ui = MainWindow::new()?;
     CURRENT_WINDOW.with(|c| *c.borrow_mut() = Some(ui.as_weak()));
     let theme = ui.global::<Theme>();
@@ -302,6 +540,10 @@ pub fn run_app() -> Result<()> {
     let mode = devkit_core::prefs::get_int(devkit_core::prefs::KEY_APPEARANCE_MODE).unwrap_or(0);
     state.set_appearance_mode(mode as i32);
     apply_appearance(&theme, mode);
+
+    // ---- 界面缩放 ----
+    let ui_scale = devkit_core::prefs::get_int(devkit_core::prefs::KEY_UI_SCALE).unwrap_or(0);
+    state.set_ui_scale(ui_scale as i32);
     spawn_appearance_watcher(ui.as_weak());
 
     // ---- 侧栏宽度 ----
@@ -317,6 +559,22 @@ pub fn run_app() -> Result<()> {
 
     // ---- 共享上下文 ----
     let ctx = Rc::new(Ctx::new());
+    // Git 后台任务的消息通道 + 轮询定时器（所有 git 子进程都在后台线程跑）。
+    {
+        let (tx, rx) = crossbeam_channel::unbounded::<crate::glue_git::GitMsg>();
+        *ctx.git_chan.borrow_mut() = Some(tx);
+        *ctx.git_rx.borrow_mut() = Some(rx);
+        let ctx2 = ctx.clone();
+        let timer = slint::Timer::default();
+        timer.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_millis(120),
+            move || {
+                crate::glue_git::poll_git(&ctx2);
+            },
+        );
+        *ctx.git_timer.borrow_mut() = Some(timer);
+    }
     let tabs_model: Rc<VecModel<TabItemData>> = Rc::new(VecModel::default());
     state.set_tabs(ModelRc::from(tabs_model.clone()));
     TABS_MODEL.with(|t| *t.borrow_mut() = Some(tabs_model.clone()));
@@ -355,16 +613,8 @@ pub fn run_app() -> Result<()> {
             }
             let Some(desc) = crate::registry::find(&tool_id) else { return };
             let model = tabs_model_handle();
-            // 单实例工具：已打开则直接选中
-            {
-                let tabs = ctx.tabs.borrow();
-                if let Some(t) = tabs.iter().find(|t| t.tool_id == desc.id) {
-                    let id = t.id.to_string();
-                    drop(tabs);
-                    select_tab(&ui, &ctx, model.as_ref(), &id);
-                    return;
-                }
-            }
+            // 五个工具都允许多实例（对齐 macOS 端 allowsMultipleInstances）：
+            // 每次从 Launcher 打开都新建一个标签页，互不干扰。
             let id = uuid::Uuid::new_v4();
             if desc.id == ids::JSON {
                 ctx.json_runs.borrow_mut().insert(
@@ -418,7 +668,7 @@ pub fn run_app() -> Result<()> {
         let ui = ui.as_weak();
         state.on_close_tab(move |id| {
             let Some(ui) = ui.upgrade() else { return };
-            close_tab_impl(&ui, &ctx, &id);
+            request_close_tab(&ui, &ctx, &id);
         });
     }
     {
@@ -429,8 +679,32 @@ pub fn run_app() -> Result<()> {
             let Some(ui) = ui.upgrade() else { return };
             let id = ctx.active.borrow().clone();
             if !id.is_empty() {
+                request_close_tab(&ui, &ctx, &id);
+            }
+        });
+    }
+    {
+        // 关闭确认框
+        let ctx = ctx.clone();
+        let ui = ui.as_weak();
+        state.on_confirm_close_yes(move || {
+            let Some(ui) = ui.upgrade() else { return };
+            let state = ui.global::<AppState>();
+            let id = state.get_confirm_target().to_string();
+            state.set_confirm_visible(false);
+            state.set_confirm_target("".into());
+            if !id.is_empty() {
                 close_tab_impl(&ui, &ctx, &id);
             }
+        });
+    }
+    {
+        let ui = ui.as_weak();
+        state.on_confirm_close_no(move || {
+            let Some(ui) = ui.upgrade() else { return };
+            let state = ui.global::<AppState>();
+            state.set_confirm_visible(false);
+            state.set_confirm_target("".into());
         });
     }
     {
@@ -689,6 +963,14 @@ pub fn run_app() -> Result<()> {
             apply_appearance(&ui.global::<Theme>(), mode as u32);
         });
     }
+    {
+        let ui = ui.as_weak();
+        state.on_set_ui_scale(move |level| {
+            let Some(ui) = ui.upgrade() else { return };
+            ui.global::<AppState>().set_ui_scale(level);
+            let _ = devkit_core::prefs::set_int(devkit_core::prefs::KEY_UI_SCALE, level as u32);
+        });
+    }
     // ---- 标签分组（M7）----
     {
         let ctx = ctx.clone();
@@ -917,15 +1199,7 @@ pub fn run_app() -> Result<()> {
     // 首屏工具卡片：启动即填充（此后仅在搜索时由 on_launcher_search 刷新）
     refresh_launcher(&state, "");
 
-    // ---- 运行 ----
-    let result = ui.run();
-
-    // 退出前保存会话
-    if ctx.db.borrow().is_some() {
-        save_session(&ctx);
-    }
-    result?;
-    Ok(())
+    Ok((ui, ctx))
 }
 
 /// 打开（或创建）数据目录与数据库，并恢复会话。
@@ -934,10 +1208,38 @@ fn init_data_dir(ui: &MainWindow, ctx: &Rc<Ctx>, dir: &str) -> Result<()> {
     devkit_core::prefs::set_data_dir(dir)?;
     let db = Database::open(&std::path::Path::new(dir).join("devkit.sqlite3"))?;
     *ctx.db.borrow_mut() = Some(db);
+    // 数据目录可能被重置过，先清空既有标签，避免恢复时追加重复标签。
+    clear_tabs(ctx);
     restore_session(ui, ctx);
     // 数据目录变化会影响 tools 解析（应用内安装位置）
     refresh_tool_status(ui);
     Ok(())
+}
+
+/// 清空所有标签与运行时（切换数据目录前调用）。
+fn clear_tabs(ctx: &Rc<Ctx>) {
+    {
+        let mut runs = ctx.ssh_runs.borrow_mut();
+        for (_, run) in runs.drain() {
+            if let Some(mut t) = run.terminal {
+                t.pty.kill();
+            }
+        }
+    }
+    ctx.json_runs.borrow_mut().clear();
+    ctx.http_runs.borrow_mut().clear();
+    ctx.sftp_runs.borrow_mut().clear();
+    ctx.git_runs.borrow_mut().clear();
+    ctx.tabs.borrow_mut().clear();
+    ctx.groups.borrow_mut().clear();
+    *ctx.active.borrow_mut() = String::new();
+    if let Some(ui) = current_window() {
+        let state = ui.global::<AppState>();
+        state.set_active_id("".into());
+        state.set_active_tool_id("".into());
+        state.set_launcher_visible(true);
+        tabs_model_handle().clear();
+    }
 }
 
 /// 刷新外部运行工具（git / OpenSSH）状态：设置页展示 + 工具页缺失横幅。
@@ -950,7 +1252,7 @@ fn refresh_tool_status(ui: &MainWindow) {
 }
 
 /// 选择标签：加载目标状态到全局镜像。
-fn select_tab(ui: &MainWindow, ctx: &Rc<Ctx>, model: &VecModel<TabItemData>, id: &str) {
+fn select_tab(ui: &MainWindow, ctx: &Rc<Ctx>, _model: &VecModel<TabItemData>, id: &str) {
     if ctx.active.borrow().clone() == id {
         return;
     }
@@ -1084,7 +1386,7 @@ fn wire_json_callbacks(ctx: Rc<Ctx>) {
         });
     }
     {
-        let ctx = ctx.clone();
+        let _ctx = ctx.clone();
         json_ui.on_copy_all(move || {
             let Some(ui) = current_window() else { return };
             let json_ui = ui.global::<JsonUI>();
@@ -1116,8 +1418,28 @@ fn wire_json_callbacks(ctx: Rc<Ctx>) {
         });
     }
     {
-        json_ui.on_tree_copied(move |_index| {
-            // 复制子树：后续增强
+        let ctx = ctx.clone();
+        json_ui.on_tree_copied(move |index| {
+            let Some(ui) = current_window() else { return };
+            let json_ui = ui.global::<JsonUI>();
+            let active = ctx.active.borrow().clone();
+            let path = {
+                let runs = ctx.json_runs.borrow();
+                runs.get(active.as_str()).and_then(|r| r.flat_paths.get(index as usize).cloned())
+            };
+            let Some(path) = path else { return };
+            let runs = ctx.json_runs.borrow();
+            let Some(run) = runs.get(active.as_str()) else { return };
+            let Some(value) = run.tool.value_at(&path) else {
+                set_status(&json_ui, "无法定位该节点");
+                return;
+            };
+            let text = devkit_tools::json::format::pretty(&value, devkit_tools::json::Indent::Two);
+            drop(runs);
+            match arboard::Clipboard::new().and_then(|mut c| c.set_text(text)) {
+                Ok(()) => set_status(&json_ui, "已复制该节点"),
+                Err(e) => set_status(&json_ui, &format!("复制失败：{e}")),
+            }
         });
     }
 
@@ -1172,6 +1494,7 @@ fn apply_json_transform(
 fn apply_json_sort(ctx: &Rc<Ctx>, desc: bool) {
     let Some(ui) = current_window() else { return };
     let json_ui = ui.global::<JsonUI>();
+    json_ui.set_sort_desc(desc);
     let recursive = json_ui.get_sort_recursive();
     let mode = match (desc, recursive) {
         (false, true) => SortMode::AscRecursive,
@@ -1299,6 +1622,18 @@ fn restore_session(ui: &MainWindow, ctx: &Rc<Ctx>) {
                 }
             }
             ctx.ssh_runs.borrow_mut().insert(id.clone(), run);
+        } else if tab.tool_id == ids::SFTP {
+            // SFTP 会话（连接状态）不持久化，但必须建立运行时，
+            // 否则恢复出来的标签所有回调都会静默失效。
+            ctx.sftp_runs.borrow_mut().insert(id.clone(), Default::default());
+        } else if tab.tool_id == ids::GIT {
+            let mut run = crate::glue_git::GitRun::default();
+            if let Some(ts) = &tab.tool_state {
+                if let Ok(s) = serde_json::from_value::<crate::glue_git::GitToolState>(ts.clone()) {
+                    run.repo_id = s.repo_id;
+                }
+            }
+            ctx.git_runs.borrow_mut().insert(id.clone(), run);
         }
         ctx.tabs.borrow_mut().push(TabEntry {
             id: tab.id,
@@ -1335,8 +1670,26 @@ fn restore_session(ui: &MainWindow, ctx: &Rc<Ctx>) {
     }
 }
 
+thread_local! {
+    /// 无头截图模式下跳过会话写盘（排障/回归测试不应污染用户已保存的标签）。
+    static NO_SESSION_SAVE: RefCell<bool> = const { RefCell::new(false) };
+}
+
+/// 读取形如 "1,2,3" 的环境变量，返回其中解析成功的整数（供截图模式批量触发回调）。
+fn env_list(key: &str) -> Vec<i32> {
+    std::env::var(key)
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|s| s.trim().parse::<i32>().ok())
+        .collect()
+}
+
 /// 保存会话。
 fn save_session(ctx: &Rc<Ctx>) {
+    // 无头截图模式只用于排障/回归测试，不该改写用户已保存的标签集合。
+    if NO_SESSION_SAVE.with(|c| *c.borrow()) {
+        return;
+    }
     let Some(db) = ctx.db() else { return };
     let tabs = ctx.tabs.borrow();
     let active = ctx.active.borrow().clone();
@@ -1370,6 +1723,16 @@ fn save_session(ctx: &Rc<Ctx>) {
                     })
                     .ok()
                 }),
+            ids::GIT => ctx
+                .git_runs
+                .borrow()
+                .get(t.id.to_string().as_str())
+                .and_then(|r| {
+                    serde_json::to_value(&crate::glue_git::GitToolState {
+                        repo_id: r.repo_id.clone(),
+                    })
+                    .ok()
+                }),
             _ => None,
         };
         if t.id.to_string() == active {
@@ -1400,6 +1763,136 @@ fn save_session(ctx: &Rc<Ctx>) {
 }
 
 /// 应用外观模式（0 跟随系统 / 1 浅 / 2 深）。
+/// 用户选择的界面缩放档位（0=跟随系统，1=110%，2=125%，3=150%）。
+///
+/// Slint 没有运行期缩放 API，只能在创建窗口前用 `SLINT_SCALE_FACTOR` 覆盖渲染比例。
+/// 该变量是「绝对值」而非倍数，所以必须叠加系统 DPI 比例，否则在高分屏上会把
+/// 系统已经放大的界面又缩回去。默认档位 0 不设置变量，保留 winit 的多屏自适应。
+fn apply_ui_scale() {
+    let level = devkit_core::prefs::get_int(devkit_core::prefs::KEY_UI_SCALE).unwrap_or(0);
+    let factor = match level {
+        1 => 1.1_f32,
+        2 => 1.25,
+        3 => 1.5,
+        _ => return,
+    };
+    let base = system_dpi_scale();
+    std::env::set_var("SLINT_SCALE_FACTOR", format!("{:.4}", base * factor));
+}
+
+/// 启动时把窗口收敛到当前显示器工作区内。
+///
+/// 窗口的理想尺寸是固定逻辑像素（1200x800），在大缩放下会换算成超过屏幕的物理尺寸，
+/// 加上 Windows 的级联定位，底部状态栏会被任务栏压住。这里读真实窗口矩形，
+/// 只在溢出时按工作区的 92% 收缩并居中。用 Win32 而非 Slint API，是因为窗口刚映射时
+/// `Window::size()` 仍返回 0，且 set_size 不会调整位置。
+fn clamp_window_to_workarea() {
+    #[cfg(windows)]
+    {
+        #[repr(C)]
+        struct Rect {
+            left: i32,
+            top: i32,
+            right: i32,
+            bottom: i32,
+        }
+        #[link(name = "user32")]
+        extern "system" {
+            fn SystemParametersInfoW(
+                action: u32,
+                param: u32,
+                data: *mut core::ffi::c_void,
+                win_ini: u32,
+            ) -> i32;
+            fn GetActiveWindow() -> isize;
+            fn GetWindowThreadProcessId(hwnd: isize, pid: *mut u32) -> u32;
+            fn GetCurrentProcessId() -> u32;
+            fn GetWindowRect(hwnd: isize, rect: *mut Rect) -> i32;
+            fn SetWindowPos(
+                hwnd: isize,
+                after: isize,
+                x: i32,
+                y: i32,
+                cx: i32,
+                cy: i32,
+                flags: u32,
+            ) -> i32;
+        }
+        const SPI_GETWORKAREA: u32 = 0x0030;
+        const SWP_NOZORDER: u32 = 0x0004;
+        const SWP_NOACTIVATE: u32 = 0x0010;
+
+        let mut work = Rect { left: 0, top: 0, right: 0, bottom: 0 };
+        let ok = unsafe {
+            SystemParametersInfoW(
+                SPI_GETWORKAREA,
+                0,
+                &mut work as *mut Rect as *mut core::ffi::c_void,
+                0,
+            )
+        };
+        if ok == 0 {
+            return;
+        }
+        let hwnd = unsafe { GetActiveWindow() };
+        if hwnd == 0 {
+            return;
+        }
+        // 只操作本进程的窗口，避免活动窗口恰好是别的程序时误移。
+        let mut pid = 0u32;
+        unsafe {
+            GetWindowThreadProcessId(hwnd, &mut pid);
+        }
+        if pid != unsafe { GetCurrentProcessId() } {
+            return;
+        }
+        let mut cur = Rect { left: 0, top: 0, right: 0, bottom: 0 };
+        if unsafe { GetWindowRect(hwnd, &mut cur) } == 0 {
+            return;
+        }
+        let (cur_w, cur_h) = (cur.right - cur.left, cur.bottom - cur.top);
+        let (work_w, work_h) = (work.right - work.left, work.bottom - work.top);
+        let max_w = (work_w as f32 * 0.92) as i32;
+        let max_h = (work_h as f32 * 0.92) as i32;
+        if cur_w <= max_w && cur_h <= max_h && cur.bottom <= work.bottom {
+            return;
+        }
+        let w = cur_w.min(max_w);
+        let h = cur_h.min(max_h);
+        let x = work.left + (work_w - w) / 2;
+        let y = work.top + (work_h - h) / 2;
+        unsafe {
+            SetWindowPos(hwnd, 0, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+    }
+}
+
+/// 读取主显示器的 DPI 比例。调用前需让本进程具备 DPI 感知，
+/// 否则 `GetDpiForSystem` 在虚拟化环境下恒返回 96。
+#[cfg(windows)]
+fn system_dpi_scale() -> f32 {
+    #[link(name = "user32")]
+    extern "system" {
+        fn SetProcessDpiAwarenessContext(value: isize) -> i32;
+        fn GetDpiForSystem() -> u32;
+    }
+    const PER_MONITOR_AWARE_V2: isize = -4;
+    unsafe {
+        let _ = SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2);
+        let dpi = GetDpiForSystem();
+        if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 }
+    }
+}
+
+#[cfg(not(windows))]
+fn system_dpi_scale() -> f32 {
+    1.0
+}
+
+/// 应用外观模式（0 跟随系统 / 1 浅 / 2 深）。
+///
+/// 自绘控件用 `Theme.dark`；Slint 标准控件（输入框 / 下拉框 / 复选框）的配色由
+/// MainWindow.slint 里的 `changed dark-mode` 同步到 `Palette.color-scheme`。
 fn apply_appearance(theme: &Theme, mode: u32) {
     let dark = match mode {
         1 => false,
@@ -1409,10 +1902,11 @@ fn apply_appearance(theme: &Theme, mode: u32) {
     theme.set_dark(dark);
 }
 
-/// 跟随系统模式下每 2 秒轮询注册表。
+/// 跟随系统模式下轮询注册表（Windows 没有轻量的主题变更通知，
+/// 用 1 秒轮询 + 变更比对，代价极低）。
 fn spawn_appearance_watcher(ui: Weak<MainWindow>) {
     std::thread::spawn(move || loop {
-        std::thread::sleep(std::time::Duration::from_secs(2));
+        std::thread::sleep(std::time::Duration::from_secs(1));
         let ui = ui.clone();
         let _ = slint::invoke_from_event_loop(move || {
             let Some(ui) = ui.upgrade() else { return };

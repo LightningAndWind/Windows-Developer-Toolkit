@@ -1,197 +1,277 @@
-// SSH 工具视图：连接横幅 + 终端 + 未连接时的会话记录选择面板 + 记录编辑器。
+// SSH 工具视图：未连接时的会话选择 / 记录编辑；连接后为「连接横幅 + 终端」。
 import { ListView, LineEdit, ComboBox } from "std-widgets.slint";
 import { Theme } from "../globals/Theme.slint";
 import { SshUI, SshTreeNode } from "../globals/SshUI.slint";
 import { AppState } from "../globals/AppState.slint";
 import { TerminalView } from "TerminalView.slint";
+import { AppButton, AppIconButton, Label, HLine, SectionHeader, Panel, EmptyState } from "../components/Controls.slint";
 
-component SButton inherits Rectangle {
+component ProfileRow inherits Rectangle {
+    in property <SshTreeNode> node;
+    in property <int> index;
+    height: 36px;
+    border-radius: Theme.radius;
+    background: row-ta.has-hover ? Theme.hover : transparent;
+
+    row-ta := TouchArea {
+        clicked => {
+            if (node.is-folder) { SshUI.tree-toggled(index); } else { SshUI.tree-selected(index); }
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 8px + node.depth * 16px;
+        padding-right: 8px;
+        spacing: 8px;
+        cross-axis-alignment: center;
+
+        Text {
+            width: 14px;
+            text: node.is-folder ? (node.expanded ? "\u{E70D}" : "\u{E76C}") : "";
+            color: Theme.text-tertiary;
+            font-family: "Segoe MDL2 Assets";
+            font-size: Theme.fs-caption;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        Text {
+            width: 18px;
+            text: node.is-folder ? "\u{E8B7}" : (node.is-local ? "\u{E80F}" : "\u{E756}");
+            font-family: "Segoe MDL2 Assets";
+            font-size: Theme.fs-small;
+            color: node.is-folder ? Theme.text-secondary : Theme.accent;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        Label {
+            text: node.name;
+            size: Theme.fs-small;
+            horizontal-stretch: 1;
+        }
+
+        if !node.is-folder: Label {
+            text: node.summary;
+            size: Theme.fs-caption;
+            role: 2;
+            max-width: 260px;
+        }
+
+        if !node.is-folder: AppIconButton {
+            icon: "\u{E70F}";
+            box: 24px;
+            icon-size: 11px;
+            clicked => { SshUI.edit-record(index); }
+        }
+
+        AppIconButton {
+            icon: "\u{E74D}";
+            box: 24px;
+            icon-size: 11px;
+            clicked => { SshUI.tree-deleted(index); }
+        }
+    }
+}
+
+component FieldRow inherits Rectangle {
     in property <string> label;
-    in property <bool> on: false;
-    callback clicked;
-    height: 28px;
-    min-width: 60px;
-    padding-left: 12px;
-    padding-right: 12px;
-    border-radius: 6px;
-    background: ta.has-hover ? (root.on ? #0a94ff : Theme.hover) : (root.on ? Theme.accent : Theme.active);
-    ta := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.clicked(); } }
-    Text {
-        text: root.label;
-        font-size: 12px;
-        color: root.on ? #ffffff : Theme.text;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+    height: 32px;
+    HorizontalLayout {
+        spacing: 8px;
+        cross-axis-alignment: center;
+        Text {
+            text: root.label;
+            width: 84px;
+            color: Theme.text-secondary;
+            font-size: Theme.fs-small;
+            vertical-alignment: center;
+        }
+        @children
     }
 }
 
 export component SshToolView inherits Rectangle {
     background: Theme.content-bg;
 
-    tv := TerminalView {
-        visible: SshUI.state-kind == 2;
-        width: parent.width;
-        // 连接横幅悬浮会盖住终端首行：已连接时把终端整体下移 30px，
-        // 并让行数按可视高度重算（changed height → geometry-changed → PTY resize）。
-        y: SshUI.connected ? 30px : 0px;
-        height: parent.height - (SshUI.connected ? 30px : 0px);
-        term-bg: #18181b;
-    }
+    // ===== 已连接 / 连接中 / 失败：横幅 + 终端 =====
+    if SshUI.state-kind != 0: VerticalLayout {
+        padding: 10px;
+        spacing: 8px;
 
-    // ===== 连接横幅 =====
-    Rectangle {
-        visible: SshUI.state-kind != 0 || SshUI.editor-visible == false;
-        x: 0;
-        y: 0;
-        width: parent.width;
-        height: SshUI.connected ? 30px : 0px;
-        background: Theme.sidebar-bg;
+        // 连接横幅
+        Rectangle {
+            height: 38px;
+            border-radius: Theme.radius;
+            background: Theme.card-bg;
+            border-width: 1px;
+            border-color: Theme.border;
 
-        HorizontalLayout {
-            padding-left: 10px;
-            padding-right: 10px;
-            spacing: 8px;
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 8px;
+                spacing: 8px;
+                cross-axis-alignment: center;
 
-            Rectangle {
-                width: 8px;
-                height: 8px;
-                y: 11px;
-                border-radius: 4px;
-                background: SshUI.state-kind == 1 ? Theme.warn : (SshUI.connected ? Theme.ok : Theme.danger);
+                Rectangle {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 4px;
+                    background: SshUI.state-kind == 1
+                        ? Theme.warn
+                        : (SshUI.state-kind == 2 ? Theme.ok : Theme.danger);
+                }
+
+                Label {
+                    text: SshUI.connect-summary == ""
+                        ? SshUI.state-text
+                        : "\{SshUI.connect-summary} · \{SshUI.state-text}";
+                    size: Theme.fs-small;
+                    horizontal-stretch: 1;
+                    color: SshUI.state-kind == 2 ? Theme.text : (SshUI.state-kind == 1 ? Theme.text-secondary : Theme.danger);
+                }
+
+                if SshUI.connected: AppButton {
+                    label: "断开";
+                    btn-height: 26px;
+                    clicked => { SshUI.disconnect(); }
+                }
+
+                if SshUI.state-kind == 3 || SshUI.state-kind == 4: AppButton {
+                    label: "会话列表";
+                    btn-height: 26px;
+                    clicked => { SshUI.show-chooser(); }
+                }
+
+                if SshUI.state-kind == 3 || SshUI.state-kind == 4: AppButton {
+                    label: "重新连接";
+                    icon: "\u{E72C}";
+                    kind: 1;
+                    btn-height: 26px;
+                    clicked => { SshUI.reconnect(); }
+                }
             }
-            Text {
-                text: SshUI.connect-summary == "" ? SshUI.state-text : "\{SshUI.connect-summary} · \{SshUI.state-text}";
-                color: Theme.text-secondary;
-                font-size: 12px;
-                vertical-alignment: center;
-                horizontal-stretch: 1;
-                overflow: elide;
-            }
-            if SshUI.connected: SButton {
-                label: "断开";
-                height: 22px;
-                clicked => { SshUI.disconnect(); }
-            }
-            if SshUI.state-kind == 4: SButton {
-                label: "重新连接";
-                height: 22px;
-                clicked => { SshUI.reconnect(); }
+        }
+
+        // 终端
+        Rectangle {
+            vertical-stretch: 1;
+            border-radius: Theme.radius;
+            background: Theme.terminal-bg;
+            border-width: 1px;
+            border-color: Theme.border;
+            clip: true;
+
+            TerminalView {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: parent.height;
+                term-bg: Theme.terminal-bg;
             }
         }
     }
 
-    // ===== 未连接：会话记录选择面板 =====
-    if SshUI.state-kind == 0 && !SshUI.editor-visible: Rectangle {
-        background: Theme.content-bg;
+    // ===== 未连接：会话选择面板 =====
+    if SshUI.state-kind == 0 && !SshUI.editor-visible: VerticalLayout {
+        padding-left: 32px;
+        padding-right: 32px;
+        padding-top: 32px;
+        padding-bottom: 24px;
+        spacing: 12px;
 
-        VerticalLayout {
-            padding: 40px;
-            padding-top: 32px;
-            spacing: 14px;
+        Text {
+            text: "终端会话";
+            font-size: 22px;
+            font-weight: 600;
+            color: Theme.text;
+        }
+        Label {
+            text: "打开本地终端，或选择一个已保存的 SSH 连接。";
+            role: 1;
+            size: Theme.fs-small;
+        }
 
-            Text {
-                text: "终端会话";
-                font-size: 20px;
-                font-weight: 700;
-                color: Theme.text;
-            }
+        HorizontalLayout {
+            spacing: 8px;
+            cross-axis-alignment: center;
+
+            AppButton { label: "本地终端"; icon: "\u{E756}"; kind: 1; clicked => { SshUI.connect-local(); } }
+            AppButton { label: "新建远程连接"; icon: "\u{E710}"; clicked => { SshUI.new-remote-record(); } }
+            AppButton { label: "新建本地记录"; clicked => { SshUI.new-local-record(); } }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        // 缺失 OpenSSH 时的一键安装横幅
+        if AppState.ssh-missing: Rectangle {
+            height: 52px;
+            border-radius: Theme.radius;
+            background: Theme.warn-soft;
+            border-width: 1px;
+            border-color: Theme.warn;
 
             HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 10px;
                 spacing: 10px;
-                alignment: start;
+                cross-axis-alignment: center;
 
-                SButton { label: "本地终端"; on: true; clicked => { SshUI.connect-local(); } }
-                SButton { label: "新建远程记录"; clicked => { SshUI.new-remote-record(); } }
-                SButton { label: "新建本地记录"; clicked => { SshUI.new-local-record(); } }
-            }
-
-            // 缺失 OpenSSH 时的一键安装横幅
-            if AppState.ssh-missing: Rectangle {
-                height: 46px;
-                border-radius: 8px;
-                border-width: 1px;
-                border-color: Theme.warn;
-
-                HorizontalLayout {
-                    padding-left: 10px;
-                    padding-right: 10px;
-                    spacing: 8px;
-
-                    Text {
-                        text: "未检测到 OpenSSH，远程终端不可用（本地终端不受影响）。可一键安装便携版。";
-                        color: Theme.warn;
-                        font-size: 12px;
-                        overflow: elide;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                    }
-                    if !AppState.tools-installing: SButton { label: "一键安装"; on: true; clicked => { AppState.install-tool(1); } }
-                    if AppState.tools-installing: Text { text: AppState.tools-status; color: Theme.text-secondary; font-size: 11px; vertical-alignment: center; overflow: elide; }
+                Text {
+                    text: "\u{E7BA}";
+                    font-family: "Segoe MDL2 Assets";
+                    font-size: 14px;
+                    color: Theme.warn;
+                    vertical-alignment: center;
                 }
+
+                Label {
+                    text: "未检测到 OpenSSH，远程终端不可用（本地终端不受影响）。可一键安装便携版。";
+                    size: Theme.fs-small;
+                    horizontal-stretch: 1;
+                    color: Theme.warn;
+                }
+                if !AppState.tools-installing: AppButton { label: "一键安装"; kind: 1; btn-height: 26px; clicked => { AppState.install-tool(1); } }
+                if AppState.tools-installing: Label { text: AppState.tools-status; size: Theme.fs-small; role: 1; }
             }
+        }
 
-            ListView {
-                for n[index] in SshUI.profiles: Rectangle {
-                    height: 40px;
-                    background: row-ta.has-hover ? Theme.hover : transparent;
+        // 会话记录列表
+        Rectangle {
+            vertical-stretch: 1;
+            min-height: 200px;
+            border-radius: Theme.radius;
+            background: Theme.card-bg;
+            border-width: 1px;
+            border-color: Theme.border;
 
-                    row-ta := TouchArea {
-                        clicked => {
-                            if (n.is-folder) { SshUI.tree-toggled(index); } else { SshUI.tree-selected(index); }
-                        }
-                    }
+            VerticalLayout {
+                spacing: 0;
 
+                Rectangle {
+                    height: 32px;
                     HorizontalLayout {
-                        padding-left: 8px + n.depth * 18px;
-                        padding-right: 8px;
-                        spacing: 8px;
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        cross-axis-alignment: center;
+                        SectionHeader { text: "已保存的连接"; horizontal-stretch: 1; }
+                        Label { text: "\{SshUI.profiles.length} 项"; size: Theme.fs-caption; role: 2; }
+                    }
+                }
 
-                        Text {
-                            width: 16px;
-                            text: n.expanded ? "▾" : "▸";
-                            color: Theme.text-secondary;
-                            font-family: "Segoe UI Symbol";
-                            visible: n.has-children || n.is-folder;
-                            vertical-alignment: center;
-                        }
+                HLine {}
 
-                        Text {
-                            width: 20px;
-                            text: n.is-folder ? "📁" : (n.is-local ? "💻" : "🖥");
-                            font-family: "Segoe UI Symbol";
-                            vertical-alignment: center;
-                        }
+                if SshUI.profiles.length == 0: EmptyState {
+                    vertical-stretch: 1;
+                    icon: "\u{E756}";
+                    title: "还没有保存的连接";
+                    hint: "点击上方「新建远程连接」开始";
+                }
 
-                        VerticalLayout {
-                            horizontal-stretch: 1;
-                            alignment: center;
-                            spacing: 1px;
-
-                            Text {
-                                text: n.name;
-                                color: Theme.text;
-                                font-size: 13px;
-                                overflow: elide;
-                            }
-                            Text {
-                                text: n.summary;
-                                color: Theme.text-secondary;
-                                font-size: 11px;
-                                overflow: elide;
-                                visible: !n.is-folder;
-                            }
-                        }
-
-                        Rectangle {
-                            width: 26px;
-                            Text { text: "✎"; color: Theme.text-secondary; font-size: 13px; font-family: "Segoe UI Symbol"; horizontal-alignment: center; vertical-alignment: center; }
-                            TouchArea { clicked => { SshUI.edit-record(index); } }
-                        }
-                        Rectangle {
-                            width: 26px;
-                            Text { text: "✕"; color: Theme.danger; font-size: 12px; font-family: "Segoe UI Symbol"; horizontal-alignment: center; vertical-alignment: center; }
-                            TouchArea { clicked => { SshUI.tree-deleted(index); } }
-                        }
+                if SshUI.profiles.length > 0: ListView {
+                    vertical-stretch: 1;
+                    for n[index] in SshUI.profiles: ProfileRow {
+                        node: n;
+                        index: index;
                     }
                 }
             }
@@ -200,104 +280,105 @@ export component SshToolView inherits Rectangle {
 
     // ===== 记录编辑器 =====
     if SshUI.editor-visible: Rectangle {
-        background: Theme.content-bg;
+        background: rgba(0, 0, 0, 0.25);
 
-        VerticalLayout {
-            padding: 28px;
-            spacing: 10px;
+        Panel {
+            width: min(root.width - 48px, 560px);
+            height: min(root.height - 48px, 560px);
+            x: (root.width - self.width) / 2;
+            y: (root.height - self.height) / 2;
 
-            Text {
-                text: "编辑会话记录";
-                font-size: 18px;
-                font-weight: 700;
-                color: Theme.text;
-            }
-
-            HorizontalLayout {
-                spacing: 8px;
-                Text { text: "类型"; width: 90px; color: Theme.text-secondary; font-size: 12px; vertical-alignment: center; }
-                SButton { label: "本地终端"; on: SshUI.editing-local; clicked => { SshUI.editor-auth-cycled(); } }
-            }
-
-            HorizontalLayout {
-                spacing: 8px;
-                Text { text: "名称"; width: 90px; color: Theme.text-secondary; font-size: 12px; vertical-alignment: center; }
-                LineEdit { horizontal-stretch: 1; text <=> SshUI.ed-name; }
-            }
-
-            if SshUI.editing-local: HorizontalLayout {
-                spacing: 8px;
-                Text { text: "默认目录"; width: 90px; color: Theme.text-secondary; font-size: 12px; vertical-alignment: center; }
-                LineEdit { horizontal-stretch: 1; text <=> SshUI.ed-working-dir; placeholder-text: "留空 = 个人目录"; }
-                SButton { label: "浏览…"; clicked => { SshUI.pick-key-file(); } }
-            }
-
-            if !SshUI.editing-local: VerticalLayout {
+            VerticalLayout {
+                padding: 20px;
                 spacing: 10px;
 
-                HorizontalLayout {
-                    spacing: 8px;
-                    Text { text: "主机"; width: 90px; color: Theme.text-secondary; font-size: 12px; vertical-alignment: center; }
-                    LineEdit { width: 40%; text <=> SshUI.ed-host; }
-                    Text { text: "端口"; width: 40px; color: Theme.text-secondary; font-size: 12px; vertical-alignment: center; }
-                    LineEdit { width: 80px; text <=> SshUI.ed-port; }
+                Text {
+                    text: "编辑会话记录";
+                    font-size: Theme.fs-title;
+                    font-weight: 600;
+                    color: Theme.text;
+                }
+                Label { text: "记录保存在本地数据库中，密码仅存储在本机。"; role: 2; size: Theme.fs-small; }
+
+                Rectangle { height: 4px; }
+
+                FieldRow { label: "类型";
+                    ComboBox {
+                        width: 160px;
+                        height: 28px;
+                        model: ["远程 SSH", "本地终端"];
+                        current-index: SshUI.editing-local ? 1 : 0;
+                        selected(v) => { SshUI.editor-kind-changed(v == "本地终端" ? 1 : 0); }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
                 }
 
-                HorizontalLayout {
-                    spacing: 8px;
-                    Text { text: "用户名"; width: 90px; color: Theme.text-secondary; font-size: 12px; vertical-alignment: center; }
-                    LineEdit { width: 40%; text <=> SshUI.ed-user; }
+                FieldRow { label: "名称";
+                    LineEdit { horizontal-stretch: 1; height: 28px; text <=> SshUI.ed-name; font-size: Theme.fs-small; }
                 }
 
-                HorizontalLayout {
-                    spacing: 8px;
-                    Text { text: "认证"; width: 90px; color: Theme.text-secondary; font-size: 12px; vertical-alignment: center; }
-                    SButton { label: "密码"; on: SshUI.ed-auth == 0; clicked => { SshUI.ed-auth = 0; } }
-                    SButton { label: "私钥"; on: SshUI.ed-auth == 1; clicked => { SshUI.ed-auth = 1; } }
+                if SshUI.editing-local: FieldRow { label: "默认目录";
+                    LineEdit { horizontal-stretch: 1; height: 28px; text <=> SshUI.ed-working-dir; placeholder-text: "留空 = 个人目录"; font-size: Theme.fs-small; }
                 }
 
-                if SshUI.ed-auth == 0: HorizontalLayout {
-                    spacing: 8px;
-                    Text { text: "密码"; width: 90px; color: Theme.text-secondary; font-size: 12px; vertical-alignment: center; }
-                    LineEdit { horizontal-stretch: 1; text <=> SshUI.ed-password; input-type: password; }
-                }
-
-                if SshUI.ed-auth == 1: VerticalLayout {
+                if !SshUI.editing-local: VerticalLayout {
                     spacing: 10px;
-                    HorizontalLayout {
-                        spacing: 8px;
-                        Text { text: "私钥文件"; width: 90px; color: Theme.text-secondary; font-size: 12px; vertical-alignment: center; }
-                        Text { text: SshUI.ed-key-file == "" ? "未选择" : SshUI.ed-key-file; color: Theme.text; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
-                        SButton { label: "选择…"; clicked => { SshUI.pick-key-file(); } }
+
+                    FieldRow { label: "主机";
+                        LineEdit { horizontal-stretch: 1; height: 28px; text <=> SshUI.ed-host; font-size: Theme.fs-small; }
+                        Text { text: "端口"; width: 34px; color: Theme.text-secondary; font-size: Theme.fs-small; vertical-alignment: center; }
+                        LineEdit { width: 78px; height: 28px; text <=> SshUI.ed-port; font-size: Theme.fs-small; }
                     }
-                    HorizontalLayout {
-                        spacing: 8px;
-                        Text { text: "口令"; width: 90px; color: Theme.text-secondary; font-size: 12px; vertical-alignment: center; }
-                        LineEdit { horizontal-stretch: 1; text <=> SshUI.ed-passphrase; input-type: password; }
+
+                    FieldRow { label: "用户名";
+                        LineEdit { horizontal-stretch: 1; height: 28px; text <=> SshUI.ed-user; font-size: Theme.fs-small; }
+                    }
+
+                    FieldRow { label: "认证方式";
+                        ComboBox {
+                            width: 140px;
+                            height: 28px;
+                            model: ["密码", "私钥"];
+                            current-index <=> SshUI.ed-auth;
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+
+                    if SshUI.ed-auth == 0: FieldRow { label: "密码";
+                        LineEdit { horizontal-stretch: 1; height: 28px; text <=> SshUI.ed-password; input-type: password; font-size: Theme.fs-small; }
+                    }
+
+                    if SshUI.ed-auth == 1: VerticalLayout {
+                        spacing: 10px;
+                        FieldRow { label: "私钥文件";
+                            Label { text: SshUI.ed-key-file == "" ? "未选择" : SshUI.ed-key-file; size: Theme.fs-small; role: 1; horizontal-stretch: 1; }
+                            AppButton { label: "选择…"; btn-height: 26px; clicked => { SshUI.pick-key-file(); } }
+                        }
+                        FieldRow { label: "口令";
+                            LineEdit { horizontal-stretch: 1; height: 28px; text <=> SshUI.ed-passphrase; input-type: password; font-size: Theme.fs-small; }
+                        }
+                    }
+
+                    FieldRow { label: "默认目录";
+                        LineEdit { horizontal-stretch: 1; height: 28px; text <=> SshUI.ed-working-dir; placeholder-text: "远端路径，登录后自动 cd；留空不切换"; font-size: Theme.fs-small; }
                     }
                 }
+
+                if SshUI.editor-error != "": Label {
+                    text: "\{SshUI.editor-error}";
+                    color: Theme.danger;
+                    size: Theme.fs-small;
+                }
+
+                Rectangle { vertical-stretch: 1; }
 
                 HorizontalLayout {
                     spacing: 8px;
-                    Text { text: "默认目录"; width: 90px; color: Theme.text-secondary; font-size: 12px; vertical-alignment: center; }
-                    LineEdit { horizontal-stretch: 1; text <=> SshUI.ed-working-dir; placeholder-text: "远端路径，登录后自动 cd；留空不切换"; }
+                    cross-axis-alignment: center;
+                    Rectangle { horizontal-stretch: 1; }
+                    AppButton { label: "取消"; clicked => { SshUI.cancel-editor(); } }
+                    AppButton { label: "保存并连接"; kind: 1; clicked => { SshUI.save-record(); } }
                 }
-            }
-
-            Text {
-                text: SshUI.editor-error;
-                color: Theme.danger;
-                font-size: 12px;
-                visible: SshUI.editor-error != "";
-            }
-
-            Rectangle { min-height: 8px; horizontal-stretch: 1; }
-
-            HorizontalLayout {
-                alignment: end;
-                spacing: 10px;
-                SButton { label: "取消"; clicked => { SshUI.cancel-editor(); } }
-                SButton { label: "保存并连接"; on: true; clicked => { SshUI.save-record(); } }
             }
         }
     }

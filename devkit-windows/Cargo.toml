@@ -21,3 +21,14 @@ crossbeam-channel = "0.5"
 [profile.release]
 opt-level = 2
 lto = "thin"
+
+# 调试版只保留行号表（backtrace 仍能定位到源码行）。
+# 默认的 debug=2 会把 devkit.exe 撑到 ~550MB，而 cargo 每次重链接都是「替换」旧 exe，
+# Windows 会把被替换的旧文件丢进回收站 —— 一次全量编译就能往回收站塞进几十 GB。
+# 改成 line-tables-only 后 debug 版 exe 只有几十 MB，回收站不再暴涨。
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 2
+debug = "line-tables-only"

@@ -1,77 +1,68 @@
-// Git 工具视图：仓库登记 → 横幅 + 四组变更 + diff + 提交栏 + 分支/Stash/历史。
-import { ListView, LineEdit, CheckBox } from "std-widgets.slint";
+// Git 工具视图：仓库登记 → 仓库工作台（变更 / 分支 / 历史 / Stash + diff）+ 密钥管理 + 克隆。
+import { ListView, LineEdit, CheckBox, TabWidget } from "std-widgets.slint";
 import { Theme } from "../globals/Theme.slint";
-import { GitUI, GitChangeRow, GitCommitRow, GitBranchRow, GitStashRow, GitDiffRow, GitRepoNode, GitKeyRow } from "../globals/GitUI.slint";
+import { GitUI, GitChangeRow, GitCommitRow, GitBranchRow, GitStashRow } from "../globals/GitUI.slint";
 import { AppState } from "../globals/AppState.slint";
+import { AppButton, AppIconButton, Label, HLine, SectionHeader, StatusPill, Panel, EmptyState } from "../components/Controls.slint";
 
-component GButton inherits Rectangle {
-    in property <string> label;
-    in property <bool> on: false;
-    in property <bool> danger: false;
-    in property <bool> disabled: false;
-    callback clicked;
-    height: 26px;
-    min-width: 48px;
-    padding-left: 10px;
-    padding-right: 10px;
-    border-radius: 6px;
-    opacity: disabled ? 0.45 : 1.0;
-    background: ta.has-hover && !disabled ? (danger ? Theme.danger : Theme.hover) : (on ? Theme.accent-soft : transparent);
-    border-width: 1px;
-    border-color: on ? Theme.accent : Theme.divider;
-    ta := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { if (!root.disabled) { root.clicked(); } } }
-    Text {
-        text: root.label;
-        font-size: 12px;
-        color: danger ? Theme.danger : (on ? Theme.accent : Theme.text);
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-}
-
-component ListSection inherits Rectangle {
+// 变更分组（冲突 / 未暂存 / 已暂存 / 未推送）
+component ChangeSection inherits Rectangle {
     in property <string> title;
     in property <[GitChangeRow]> rows;
     in property <int> section;
-    in property <bool> unpushed-mode: false;
-    in property <[GitCommitRow]> commit-rows;
+    in property <color> tint: Theme.text-secondary;
     callback selected(int, int);
-    horizontal-stretch: 1;
 
     VerticalLayout {
+        spacing: 0;
+
         Rectangle {
-            height: 22px;
+            height: 26px;
+            background: Theme.surface;
             HorizontalLayout {
-                padding-left: 6px;
-                Text { text: root.title; color: Theme.text-secondary; font-size: 11px; font-weight: 600; vertical-alignment: center; }
+                padding-left: 10px;
+                padding-right: 8px;
+                spacing: 6px;
+                cross-axis-alignment: center;
+                SectionHeader { text: root.title; horizontal-stretch: 1; }
+                Label { text: "\{root.rows.length}"; size: Theme.fs-caption; role: 2; }
             }
         }
-        if !root.unpushed-mode: ListView {
+
+        HLine {}
+
+        if root.rows.length == 0: Label {
+            text: "（空）";
+            size: Theme.fs-caption;
+            role: 2;
+            vertical-alignment: center;
+        }
+
+        if root.rows.length > 0: ListView {
+            vertical-stretch: 1;
             for r[index] in root.rows: Rectangle {
                 height: 26px;
-                background: GitUI.selected-list == root.section && GitUI.selected-index == index ? Theme.accent-soft : (row-tap.has-hover ? Theme.hover : transparent);
+                background: GitUI.selected-list == root.section && GitUI.selected-index == index
+                    ? Theme.accent-soft
+                    : (row-tap.has-hover ? Theme.hover : transparent);
                 row-tap := TouchArea { clicked => { root.selected(root.section, index); } }
                 HorizontalLayout {
-                    padding-left: 8px;
-                    spacing: 6px;
-                    Text { text: r.untracked ? "?" : r.status; width: 22px; color: r.untracked ? Theme.warn : Theme.text-secondary; font-family: "Consolas"; font-size: 11px; vertical-alignment: center; }
-                    Text { text: r.path; color: Theme.text; font-size: 12px; overflow: elide; vertical-alignment: center; horizontal-stretch: 1; }
-                    GButton { label: "＋"; width: 24px; clicked => { GitUI.stage(root.section, index); } }
-                    GButton { label: "－"; width: 24px; clicked => { GitUI.unstage(root.section, index); } }
-                    GButton { label: "✕"; width: 24px; danger: true; clicked => { GitUI.discard(root.section, index); } }
-                }
-            }
-        }
-        if root.unpushed-mode: ListView {
-            for c[index] in root.commit-rows: Rectangle {
-                height: 26px;
-                background: commit-tap.has-hover ? Theme.hover : transparent;
-                commit-tap := TouchArea { clicked => { GitUI.history-menu(index, 4); } }
-                HorizontalLayout {
-                    padding-left: 8px;
-                    spacing: 6px;
-                    Text { text: c.short; width: 54px; color: Theme.accent; font-family: "Consolas"; font-size: 11px; vertical-alignment: center; }
-                    Text { text: c.subject; color: Theme.text; font-size: 12px; overflow: elide; vertical-alignment: center; horizontal-stretch: 1; }
+                    padding-left: 10px;
+                    padding-right: 4px;
+                    spacing: 5px;
+                    cross-axis-alignment: center;
+                    Text {
+                        text: r.untracked ? "U" : r.status;
+                        width: 18px;
+                        color: r.untracked ? Theme.warn : Theme.text-tertiary;
+                        font-family: "Consolas";
+                        font-size: Theme.fs-caption;
+                        vertical-alignment: center;
+                    }
+                    Label { text: r.path; size: Theme.fs-small; horizontal-stretch: 1; }
+                    AppIconButton { icon: "\u{E710}"; box: 20px; icon-size: 9px; clicked => { GitUI.stage(root.section, index); } }
+                    AppIconButton { icon: "\u{E738}"; box: 20px; icon-size: 9px; clicked => { GitUI.unstage(root.section, index); } }
+                    AppIconButton { icon: "\u{E74D}"; box: 20px; icon-size: 9px; clicked => { GitUI.discard(root.section, index); } }
                 }
             }
         }
@@ -82,283 +73,525 @@ export component GitToolView inherits Rectangle {
     background: Theme.content-bg;
 
     // ===== 未打开仓库：登记列表 =====
-    if !GitUI.repo-open: Rectangle {
-        VerticalLayout {
-            padding: 40px;
-            spacing: 12px;
+    if !GitUI.repo-open: VerticalLayout {
+        padding-left: 32px;
+        padding-right: 32px;
+        padding-top: 32px;
+        padding-bottom: 24px;
+        spacing: 12px;
 
-            Text { text: "Git 管理"; font-size: 20px; font-weight: 700; color: Theme.text; }
+        Text {
+            text: "Git 仓库";
+            font-size: 22px;
+            font-weight: 600;
+            color: Theme.text;
+        }
+        Label {
+            text: "登记本地仓库后即可查看变更、提交、分支与密钥绑定。";
+            role: 1;
+            size: Theme.fs-small;
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            cross-axis-alignment: center;
+
+            AppButton { label: "登记仓库…"; icon: "\u{E8B7}"; kind: 1; clicked => { GitUI.open-repo-path(); } }
+            AppButton { label: "克隆仓库…"; icon: "\u{E896}"; clicked => { GitUI.clone-start(); } }
+            AppButton { label: "密钥管理"; icon: "\u{E8D7}"; clicked => { GitUI.keys-open(); } }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        if AppState.git-missing: Rectangle {
+            height: 52px;
+            border-radius: Theme.radius;
+            background: Theme.warn-soft;
+            border-width: 1px;
+            border-color: Theme.warn;
 
             HorizontalLayout {
-                spacing: 8px;
-                alignment: start;
-                GButton { label: "登记仓库…"; on: true; clicked => { GitUI.open-repo-path(); } }
-                GButton { label: "克隆仓库…"; clicked => { GitUI.clone-start(); } }
-                GButton { label: "密钥管理"; clicked => { GitUI.keys-open(); } }
-            }
+                padding-left: 12px;
+                padding-right: 10px;
+                spacing: 10px;
+                cross-axis-alignment: center;
 
-            // 缺失 Git 时的一键安装横幅
-            if AppState.git-missing: Rectangle {
-                height: 46px;
-                border-radius: 8px;
-                border-width: 1px;
-                border-color: Theme.warn;
-
-                HorizontalLayout {
-                    padding-left: 10px;
-                    padding-right: 10px;
-                    spacing: 8px;
-
-                    Text {
-                        text: "未检测到 Git，Git 工具不可用。可一键安装便携版（下载到数据目录，不修改系统）。";
-                        color: Theme.warn;
-                        font-size: 12px;
-                        overflow: elide;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                    }
-                    if !AppState.tools-installing: GButton { label: "一键安装"; on: true; clicked => { AppState.install-tool(0); } }
-                    if AppState.tools-installing: Text { text: AppState.tools-status; color: Theme.text-secondary; font-size: 11px; vertical-alignment: center; overflow: elide; }
+                Label {
+                    text: "未检测到 Git，Git 工具不可用。可一键安装便携版（下载到数据目录，不修改系统）。";
+                    size: Theme.fs-small;
+                    color: Theme.warn;
+                    horizontal-stretch: 1;
                 }
-            }
-
-            ListView {
-                for n[index] in GitUI.repos: Rectangle {
-                    height: 40px;
-                    background: repo-tap.has-hover ? Theme.hover : transparent;
-                    repo-tap := TouchArea { clicked => { GitUI.repo-selected(index); } }
-                    HorizontalLayout {
-                        padding-left: 8px + n.depth * 18px;
-                        spacing: 8px;
-                        Text { width: 18px; text: n.is-folder ? "📁" : "🌿"; font-family: "Segoe UI Symbol"; vertical-alignment: center; }
-                        VerticalLayout {
-                            horizontal-stretch: 1;
-                            alignment: center;
-                            Text { text: n.name; color: Theme.text; font-size: 13px; overflow: elide; }
-                        }
-                        Rectangle {
-                            width: 26px;
-                            Text { text: "✕"; color: Theme.danger; font-size: 12px; font-family: "Segoe UI Symbol"; horizontal-alignment: center; vertical-alignment: center; }
-                            TouchArea { clicked => { GitUI.repo-deleted(index); } }
-                        }
-                    }
-                }
+                if !AppState.tools-installing: AppButton { label: "一键安装"; kind: 1; btn-height: 26px; clicked => { AppState.install-tool(0); } }
+                if AppState.tools-installing: Label { text: AppState.tools-status; size: Theme.fs-small; role: 1; }
             }
         }
-    }
 
-    // ===== 已打开仓库 =====
-    if GitUI.repo-open: Rectangle {
-        VerticalLayout {
-            // 横幅
-            Rectangle {
-                height: 56px;
-                background: Theme.sidebar-bg;
-                VerticalLayout {
-                    spacing: 2px;
-                    HorizontalLayout {
-                        padding-left: 10px;
-                        padding-right: 10px;
-                        spacing: 8px;
-                        Text { text: GitUI.banner-branch; color: Theme.text; font-family: "Consolas"; font-size: 13px; font-weight: 700; vertical-alignment: center; }
-                        Text { text: "↑\{GitUI.ahead} ↓\{GitUI.behind}"; color: Theme.text-secondary; font-size: 11px; vertical-alignment: center; }
-                        if GitUI.conflict-count > 0: Text { text: "⚠ 冲突 \{GitUI.conflict-count}"; color: Theme.warn; font-size: 12px; font-weight: 700; font-family: "Segoe UI Symbol"; vertical-alignment: center; }
-                        if GitUI.rebasing: Text { text: "变基中"; color: Theme.warn; font-size: 12px; vertical-alignment: center; }
-                        Rectangle { horizontal-stretch: 1; }
-                        GButton { label: "刷新"; clicked => { GitUI.refresh-all(); } }
-                        GButton { label: "拉取"; disabled: GitUI.busy; clicked => { GitUI.pull(); } }
-                        GButton { label: "推送"; disabled: GitUI.busy; clicked => { GitUI.push(); } }
-                        GButton { label: "拉取+推送"; disabled: GitUI.busy; clicked => { GitUI.pull-push(); } }
-                        GButton { label: "Fetch"; disabled: GitUI.busy; clicked => { GitUI.fetch(); } }
-                        GButton { label: "关闭"; danger: true; clicked => { GitUI.close-repo(); } }
-                    }
-                    HorizontalLayout {
-                        padding-left: 10px;
-                        spacing: 8px;
-                        Text { text: GitUI.remote-url == "" ? "（无远程）" : GitUI.remote-url; color: Theme.text-secondary; font-size: 11px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
-                        Text { text: GitUI.bound-key-name == "" ? "未绑定密钥" : "密钥：\{GitUI.bound-key-name}"; color: Theme.text-secondary; font-size: 11px; vertical-alignment: center; }
-                    }
-                }
-            }
+        Rectangle {
+            vertical-stretch: 1;
+            min-height: 180px;
+            border-radius: Theme.radius;
+            background: Theme.card-bg;
+            border-width: 1px;
+            border-color: Theme.border;
 
-            HorizontalLayout {
+            VerticalLayout {
                 spacing: 0;
 
-                // 左：变更四组 + 提交栏
                 Rectangle {
-                    width: 300px;
+                    height: 32px;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        cross-axis-alignment: center;
+                        SectionHeader { text: "已登记仓库"; horizontal-stretch: 1; }
+                        Label { text: "\{GitUI.repos.length} 个"; size: Theme.fs-caption; role: 2; }
+                    }
+                }
+                HLine {}
 
-                    VerticalLayout {
-                        Flickable {
-                            Rectangle {
-                                height: 460px;
+                if GitUI.repos.length == 0: EmptyState {
+                    vertical-stretch: 1;
+                    icon: "\u{E8AB}";
+                    title: "还没有登记仓库";
+                    hint: "点击「登记仓库…」选择本地目录";
+                }
 
-                                VerticalLayout {
-                                    ListSection {
-                                        title: GitUI.conflict-count > 0 ? "冲突（置顶）" : "冲突";
-                                        rows: GitUI.changes-conflict;
-                                        section: 0;
-                                        height: 86px;
-                                        selected(i1, i2) => { GitUI.select-change(i1, i2); }
-                                    }
-                                    ListSection {
-                                        title: "未暂存";
-                                        rows: GitUI.changes-unstaged;
-                                        section: 1;
-                                        height: 108px;
-                                        selected(i1, i2) => { GitUI.select-change(i1, i2); }
-                                    }
-                                    ListSection {
-                                        title: "未提交（已暂存）";
-                                        rows: GitUI.changes-staged;
-                                        section: 2;
-                                        height: 108px;
-                                        selected(i1, i2) => { GitUI.select-change(i1, i2); }
-                                    }
-                                    ListSection {
-                                        title: "未推送";
-                                        unpushed-mode: true;
-                                        commit-rows: GitUI.changes-unpushed;
-                                        section: 3;
-                                        height: 108px;
-                                        selected(i1, i2) => { GitUI.select-change(i1, i2); }
-                                    }
-                                }
+                if GitUI.repos.length > 0: ListView {
+                    vertical-stretch: 1;
+                    for n[index] in GitUI.repos: Rectangle {
+                        height: 36px;
+                        background: repo-tap.has-hover ? Theme.hover : transparent;
+                        repo-tap := TouchArea { clicked => { GitUI.repo-selected(index); } }
+                        HorizontalLayout {
+                            padding-left: 10px + n.depth * 16px;
+                            padding-right: 8px;
+                            spacing: 8px;
+                            cross-axis-alignment: center;
+                            Text {
+                                width: 18px;
+                                text: n.is-folder ? "\u{E8B7}" : "\u{E8AB}";
+                                font-family: "Segoe MDL2 Assets";
+                                font-size: Theme.fs-small;
+                                color: n.is-folder ? Theme.text-secondary : Theme.accent;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
                             }
-                        }
-
-                        // 提交栏
-                        Rectangle {
-                            height: 96px;
-                            background: Theme.sidebar-bg;
-                            VerticalLayout {
-                                padding: 8px;
-                                spacing: 6px;
-                                LineEdit {
-                                    placeholder-text: "提交信息（Ctrl+Enter 提交）";
-                                    text <=> GitUI.commit-message;
-                                    font-size: 12px;
-                                }
-                                HorizontalLayout {
-                                    spacing: 8px;
-                                    CheckBox {
-                                        text: "Amend";
-                                        checked <=> GitUI.amend;
-                                        font-size: 12px;
-                                    }
-                                    Rectangle { horizontal-stretch: 1; }
-                                    GButton { label: "全部暂存"; clicked => { GitUI.stage-all(1); } }
-                                    GButton { label: "全部取消"; clicked => { GitUI.unstage-all(2); } }
-                                    GButton { label: "提交"; on: true; clicked => { GitUI.commit(); } }
-                                }
-                            }
-                        }
-
-                        // 分支 / Stash
-                        Rectangle {
-                            height: 150px;
-                            HorizontalLayout {
-                                spacing: 0;
-                                VerticalLayout {
-                                    width: 150px;
-                                    Rectangle {
-                                        height: 20px;
-                                        Text { text: "分支"; color: Theme.text-secondary; font-size: 11px; x: 6px; }
-                                    }
-                                    Rectangle {
-                                        height: 26px;
-                                        HorizontalLayout {
-                                            padding-left: 6px;
-                                            spacing: 4px;
-                                            LineEdit { horizontal-stretch: 1; placeholder-text: "新分支名"; text <=> GitUI.new-branch-name; font-size: 11px; }
-                                            GButton { label: "＋"; width: 22px; clicked => { GitUI.branch-new(); } }
-                                        }
-                                    }
-                                    ListView {
-                                        for b[index] in GitUI.branches: Rectangle {
-                                            height: 24px;
-                                            background: branch-tap.has-hover ? Theme.hover : transparent;
-                                            branch-tap := TouchArea { clicked => { GitUI.branch-switch(index); } }
-                                            HorizontalLayout {
-                                                padding-left: 8px;
-                                                spacing: 4px;
-                                                Text { text: b.current ? "●" : (b.remote ? "⇄" : "○"); width: 14px; color: b.current ? Theme.ok : Theme.text-secondary; font-size: 10px; font-family: "Segoe UI Symbol"; vertical-alignment: center; }
-                                                Text { text: b.name; color: Theme.text; font-size: 11px; overflow: elide; vertical-alignment: center; horizontal-stretch: 1; }
-                                                GButton { label: "并"; width: 22px; clicked => { GitUI.merge-branch(index); } }
-                                                GButton { label: "删"; width: 22px; danger: true; clicked => { GitUI.branch-delete(index, false); } }
-                                            }
-                                        }
-                                    }
-                                }
-                                VerticalLayout {
-                                    horizontal-stretch: 1;
-                                    Rectangle {
-                                        height: 20px;
-                                        Text { text: "Stash"; color: Theme.text-secondary; font-size: 11px; x: 6px; }
-                                    }
-                                    Rectangle {
-                                        height: 26px;
-                                        HorizontalLayout {
-                                            padding-left: 6px;
-                                            GButton { label: "暂存改动"; clicked => { GitUI.stash-push(); } }
-                                        }
-                                    }
-                                    ListView {
-                                        for s[index] in GitUI.stashes: Rectangle {
-                                            height: 24px;
-                                            background: stash-tap.has-hover ? Theme.hover : transparent;
-                                            stash-tap := TouchArea { clicked => { GitUI.stash-pop(index); } }
-                                            HorizontalLayout {
-                                                padding-left: 8px;
-                                                spacing: 4px;
-                                                Text { text: s.message; color: Theme.text; font-size: 11px; overflow: elide; vertical-alignment: center; horizontal-stretch: 1; }
-                                                GButton { label: "Pop"; width: 34px; clicked => { GitUI.stash-pop(index); } }
-                                                GButton { label: "✕"; width: 22px; danger: true; clicked => { GitUI.stash-drop(index); } }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            Label { text: n.name; size: Theme.fs-small; horizontal-stretch: 1; }
+                            AppIconButton { icon: "\u{E74D}"; box: 24px; icon-size: 10px; clicked => { GitUI.repo-deleted(index); } }
                         }
                     }
                 }
+            }
+        }
+    }
 
-                // 右：diff
+    // ===== 已打开仓库：工作台 =====
+    if GitUI.repo-open: VerticalLayout {
+        spacing: 0;
+
+        // 仓库头部
+        Rectangle {
+            height: 56px;
+            background: Theme.surface;
+
+            VerticalLayout {
+                spacing: 0;
+
+                HorizontalLayout {
+                    height: 32px;
+                    padding-left: Theme.pad;
+                    padding-right: 8px;
+                    spacing: 8px;
+                    cross-axis-alignment: center;
+
+                    Text {
+                        text: GitUI.banner-branch;
+                        color: Theme.text;
+                        font-family: "Consolas";
+                        font-size: Theme.fs-small;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: "↑\{GitUI.ahead} ↓\{GitUI.behind}";
+                        color: Theme.text-secondary;
+                        font-family: "Consolas";
+                        font-size: Theme.fs-caption;
+                        vertical-alignment: center;
+                    }
+                    if GitUI.conflict-count > 0: StatusPill {
+                        label: "冲突 \{GitUI.conflict-count}";
+                        tint: Theme.warn;
+                        soft: Theme.warn-soft;
+                    }
+                    if GitUI.rebasing: StatusPill {
+                        label: "变基中";
+                        tint: Theme.warn;
+                        soft: Theme.warn-soft;
+                    }
+
+                    Rectangle { horizontal-stretch: 1; }
+
+                    AppIconButton { icon: "\u{E72C}"; box: 26px; icon-size: 11px; clicked => { GitUI.refresh-all(); } }
+                    AppButton { label: "获取"; btn-height: 26px; enabled: !GitUI.busy; clicked => { GitUI.fetch(); } }
+                    AppButton { label: "拉取"; btn-height: 26px; enabled: !GitUI.busy; clicked => { GitUI.pull(); } }
+                    AppButton { label: "推送"; btn-height: 26px; enabled: !GitUI.busy; clicked => { GitUI.push(); } }
+                    AppIconButton { icon: "\u{E8AB}"; box: 26px; icon-size: 11px; clicked => { GitUI.keys-open(); } }
+                    AppIconButton { icon: "\u{E711}"; box: 26px; icon-size: 10px; clicked => { GitUI.close-repo(); } }
+                }
+
                 Rectangle {
-                    horizontal-stretch: 1;
-
-                    VerticalLayout {
-                        Rectangle {
-                            height: 24px;
-                            HorizontalLayout {
-                                padding-left: 8px;
-                                Text { text: GitUI.diff-path == "" ? "选择左侧文件查看差异" : GitUI.diff-path; color: Theme.text-secondary; font-size: 11px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                                if GitUI.diff-path != "" && GitUI.conflict-count > 0: HorizontalLayout {
-                                    spacing: 4px;
-                                    GButton { label: "保留我方"; clicked => { GitUI.conflict-ours(GitUI.selected-index); } }
-                                    GButton { label: "保留对方"; clicked => { GitUI.conflict-theirs(GitUI.selected-index); } }
-                                    GButton { label: "标记已解决"; on: true; clicked => { GitUI.conflict-resolved(GitUI.selected-index); } }
-                                }
-                                if GitUI.rebasing: GButton { label: "中止变基"; danger: true; clicked => { GitUI.rebase-abort(); } }
-                            }
+                    height: 24px;
+                    HorizontalLayout {
+                        padding-left: Theme.pad;
+                        padding-right: Theme.pad;
+                        spacing: 8px;
+                        cross-axis-alignment: center;
+                        Text {
+                            text: "远程";
+                            color: Theme.text-tertiary;
+                            font-size: Theme.fs-caption;
+                            vertical-alignment: center;
                         }
-                        ListView {
-                            for d in GitUI.diff: Rectangle {
-                                height: 18px;
-                                background: d.kind == 1 ? rgba(48, 209, 88, 0.10) : (d.kind == 2 ? rgba(255, 69, 58, 0.10) : (d.kind == 3 ? rgba(255, 159, 10, 0.12) : transparent));
+                        LineEdit {
+                            horizontal-stretch: 1;
+                            height: 22px;
+                            text: GitUI.remote-url;
+                            placeholder-text: "（未配置远程）";
+                            font-family: "Consolas";
+                            font-size: Theme.fs-caption;
+                            accepted(t) => { GitUI.edit-remote-url(t); }
+                        }
+                        Label {
+                            text: GitUI.bound-key-name == "" ? "未绑定密钥" : "密钥 · \{GitUI.bound-key-name}";
+                            size: Theme.fs-caption;
+                            role: 2;
+                        }
+                    }
+                }
+            }
+        }
+
+        HLine {}
+
+        // 分区
+        TabWidget {
+            vertical-stretch: 1;
+
+            // ---- 变更 ----
+            Tab {
+                title: "变更";
+                VerticalLayout {
+                    spacing: 0;
+
+                    HorizontalLayout {
+                        spacing: 0;
+                        vertical-stretch: 1;
+
+                    // 变更列表
+                    Rectangle {
+                        width: 320px;
+
+                        VerticalLayout {
+                            spacing: 0;
+
+                            ChangeSection {
+                                title: "冲突";
+                                rows: GitUI.changes-conflict;
+                                section: 0;
+                                vertical-stretch: 1;
+                                selected(i1, i2) => { GitUI.select-change(i1, i2); }
+                            }
+                            HLine {}
+                            ChangeSection {
+                                title: "未暂存";
+                                rows: GitUI.changes-unstaged;
+                                section: 1;
+                                vertical-stretch: 1;
+                                selected(i1, i2) => { GitUI.select-change(i1, i2); }
+                            }
+                            HLine {}
+                            ChangeSection {
+                                title: "已暂存";
+                                rows: GitUI.changes-staged;
+                                section: 2;
+                                vertical-stretch: 1;
+                                selected(i1, i2) => { GitUI.select-change(i1, i2); }
+                            }
+
+                        }
+                    }
+
+                    Rectangle { width: 1px; background: Theme.divider; }
+
+                    // diff
+                    Rectangle {
+                        horizontal-stretch: 1;
+
+                        VerticalLayout {
+                            spacing: 0;
+
+                            Rectangle {
+                                height: 34px;
                                 HorizontalLayout {
-                                    Text { text: d.left-no > 0 ? "\{d.left-no}" : ""; width: 40px; color: Theme.text-secondary; font-family: "Consolas"; font-size: 10px; vertical-alignment: center; horizontal-alignment: right; }
-                                    Text { text: d.right-no > 0 ? "\{d.right-no}" : ""; width: 40px; color: Theme.text-secondary; font-family: "Consolas"; font-size: 10px; vertical-alignment: center; horizontal-alignment: right; }
-                                    Text {
-                                        text: d.text;
-                                        color: d.kind == 1 ? Theme.ok : (d.kind == 2 ? Theme.danger : (d.kind == 3 ? Theme.warn : (d.kind == 4 ? Theme.text-secondary : Theme.text)));
-                                        font-family: "Consolas";
-                                        font-size: 11px;
-                                        vertical-alignment: center;
-                                        overflow: elide;
+                                    padding-left: Theme.pad;
+                                    padding-right: 8px;
+                                    spacing: 6px;
+                                    cross-axis-alignment: center;
+
+                                    Label {
+                                        text: GitUI.diff-path == "" ? "选择左侧文件查看差异" : GitUI.diff-path;
+                                        size: Theme.fs-small;
+                                        role: 1;
+                                        mono: true;
                                         horizontal-stretch: 1;
                                     }
+
+                                    if GitUI.diff-path != "" && GitUI.conflict-count > 0: HorizontalLayout {
+                                        spacing: 4px;
+                                        AppButton { label: "保留我方"; btn-height: 24px; clicked => { GitUI.conflict-ours(GitUI.selected-index); } }
+                                        AppButton { label: "保留对方"; btn-height: 24px; clicked => { GitUI.conflict-theirs(GitUI.selected-index); } }
+                                        AppButton { label: "已解决"; kind: 1; btn-height: 24px; clicked => { GitUI.conflict-resolved(GitUI.selected-index); } }
+                                    }
+                                    if GitUI.rebasing: AppButton { label: "中止变基"; kind: 2; btn-height: 24px; clicked => { GitUI.rebase-abort(); } }
                                 }
+                            }
+
+                            HLine {}
+
+                            if GitUI.diff.length == 0: EmptyState {
+                                vertical-stretch: 1;
+                                icon: "\u{E943}";
+                                title: "没有可显示的差异";
+                                hint: "在左侧选择一个文件查看差异。";
+                            }
+
+                            if GitUI.diff.length > 0: ListView {
+                                vertical-stretch: 1;
+
+                                for d in GitUI.diff: Rectangle {
+                                    height: 19px;
+                                    background: d.kind == 1 ? Theme.ok-soft : (d.kind == 2 ? Theme.danger-soft : (d.kind == 3 ? Theme.warn-soft : transparent));
+
+                                    HorizontalLayout {
+                                        Text {
+                                            text: d.left-no > 0 ? "\{d.left-no}" : "";
+                                            width: 44px; color: Theme.text-tertiary;
+                                            font-family: "Consolas"; font-size: Theme.fs-caption;
+                                            horizontal-alignment: right; vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: d.right-no > 0 ? "\{d.right-no}" : "";
+                                            width: 44px; color: Theme.text-tertiary;
+                                            font-family: "Consolas"; font-size: Theme.fs-caption;
+                                            horizontal-alignment: right; vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: d.text;
+                                            color: d.kind == 1 ? Theme.ok : (d.kind == 2 ? Theme.danger : (d.kind == 3 ? Theme.warn : (d.kind == 4 ? Theme.text-secondary : Theme.text)));
+                                            font-family: "Consolas";
+                                            font-size: Theme.fs-caption;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                            horizontal-stretch: 1;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    }
+
+                    // 提交栏（固定在分区底部）
+                    HorizontalLayout {
+                        spacing: 0;
+
+                        Rectangle {
+                            width: 320px;
+                            height: 96px;
+                            background: Theme.surface;
+
+                            VerticalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                padding-top: 8px;
+                                padding-bottom: 8px;
+                                spacing: 6px;
+
+                                LineEdit {
+                                    height: 26px;
+                                    placeholder-text: "提交信息…";
+                                    text <=> GitUI.commit-message;
+                                    font-size: Theme.fs-small;
+                                }
+
+                                HorizontalLayout {
+                                    spacing: 5px;
+                                    cross-axis-alignment: center;
+                                    CheckBox { text: "Amend"; checked <=> GitUI.amend; font-size: Theme.fs-caption; }
+
+                                    Rectangle { horizontal-stretch: 1; }
+
+                                    AppButton { label: "全存"; btn-height: 24px; clicked => { GitUI.stage-all(1); } }
+                                    AppButton { label: "全消"; btn-height: 24px; clicked => { GitUI.unstage-all(2); } }
+                                    AppButton { label: "提交"; kind: 1; btn-height: 24px; clicked => { GitUI.commit(); } }
+                                }
+                            }
+                        }
+
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                }
+            }
+
+            // ---- 分支 ----
+            Tab {
+                title: "分支";
+                VerticalLayout {
+                    spacing: 0;
+
+                    Rectangle {
+                        height: 38px;
+                        HorizontalLayout {
+                            padding-left: Theme.pad;
+                            padding-right: Theme.pad;
+                            spacing: 8px;
+                            cross-axis-alignment: center;
+                            LineEdit {
+                                horizontal-stretch: 1;
+                                height: 28px;
+                                placeholder-text: "新分支名";
+                                text <=> GitUI.new-branch-name;
+                                font-size: Theme.fs-small;
+                            }
+                            AppButton { label: "新建分支"; kind: 1; btn-height: 28px; clicked => { GitUI.branch-new(); } }
+                        }
+                    }
+                    HLine {}
+
+                    if GitUI.branches.length == 0: EmptyState {
+                        vertical-stretch: 1;
+                        icon: "\u{E8AB}";
+                        title: "没有分支";
+                    }
+
+                    if GitUI.branches.length > 0: ListView {
+                        vertical-stretch: 1;
+                        for b[index] in GitUI.branches: Rectangle {
+                            height: 30px;
+                            background: branch-tap.has-hover ? Theme.hover : transparent;
+                            branch-tap := TouchArea { clicked => { GitUI.branch-switch(index); } }
+                            HorizontalLayout {
+                                padding-left: Theme.pad;
+                                padding-right: Theme.pad;
+                                spacing: 6px;
+                                cross-axis-alignment: center;
+                                Text {
+                                    text: b.current ? "●" : (b.remote ? "⇄" : "○");
+                                    width: 14px;
+                                    color: b.current ? Theme.accent : Theme.text-tertiary;
+                                    font-size: Theme.fs-caption;
+                                    vertical-alignment: center;
+                                }
+                                Label { text: b.name; size: Theme.fs-small; mono: true; horizontal-stretch: 1; }
+                                if !b.remote && !b.current: AppIconButton { icon: "\u{E8AB}"; box: 22px; icon-size: 10px; clicked => { GitUI.merge-branch(index); } }
+                                if !b.remote && !b.current: AppIconButton { icon: "\u{E74D}"; box: 22px; icon-size: 10px; clicked => { GitUI.branch-delete(index, false); } }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---- 历史 ----
+            Tab {
+                title: "历史";
+                VerticalLayout {
+                    spacing: 0;
+
+                    Rectangle {
+                        height: 38px;
+                        HorizontalLayout {
+                            padding-left: Theme.pad;
+                            padding-right: Theme.pad;
+                            spacing: 8px;
+                            cross-axis-alignment: center;
+                            SectionHeader { text: "提交历史"; horizontal-stretch: 1; }
+                            AppButton {
+                                label: "加载更多";
+                                btn-height: 26px;
+                                enabled: GitUI.has-more-history;
+                                clicked => { GitUI.history-more(); }
+                            }
+                        }
+                    }
+                    HLine {}
+
+                    if GitUI.history.length == 0: EmptyState {
+                        vertical-stretch: 1;
+                        icon: "\u{E8AB}";
+                        title: "没有提交记录";
+                    }
+
+                    if GitUI.history.length > 0: ListView {
+                        vertical-stretch: 1;
+                        for c[index] in GitUI.history: Rectangle {
+                            height: 30px;
+                            background: commit-tap.has-hover ? Theme.hover : transparent;
+                            commit-tap := TouchArea { clicked => { GitUI.history-menu(index, 4); } }
+                            HorizontalLayout {
+                                padding-left: Theme.pad;
+                                padding-right: Theme.pad;
+                                spacing: 8px;
+                                cross-axis-alignment: center;
+                                Text { text: c.short; width: 56px; color: Theme.accent; font-family: "Consolas"; font-size: Theme.fs-caption; vertical-alignment: center; }
+                                Label { text: c.subject; size: Theme.fs-small; horizontal-stretch: 1; }
+                                Text { text: c.author; color: Theme.text-tertiary; font-size: Theme.fs-caption; width: 110px; vertical-alignment: center; overflow: elide; }
+                                Text { text: c.date; color: Theme.text-tertiary; font-size: Theme.fs-caption; width: 130px; vertical-alignment: center; overflow: elide; }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ---- Stash ----
+            Tab {
+                title: "Stash";
+                VerticalLayout {
+                    spacing: 0;
+
+                    Rectangle {
+                        height: 38px;
+                        HorizontalLayout {
+                            padding-left: Theme.pad;
+                            padding-right: Theme.pad;
+                            spacing: 8px;
+                            cross-axis-alignment: center;
+                            SectionHeader { text: "Stash"; horizontal-stretch: 1; }
+                            AppButton { label: "暂存当前改动"; btn-height: 26px; clicked => { GitUI.stash-push(); } }
+                        }
+                    }
+                    HLine {}
+
+                    if GitUI.stashes.length == 0: EmptyState {
+                        vertical-stretch: 1;
+                        icon: "\u{E74F}";
+                        title: "没有 stash 记录";
+                    }
+
+                    if GitUI.stashes.length > 0: ListView {
+                        vertical-stretch: 1;
+                        for s[index] in GitUI.stashes: Rectangle {
+                            height: 30px;
+                            background: stash-tap.has-hover ? Theme.hover : transparent;
+                            stash-tap := TouchArea { clicked => { GitUI.stash-pop(index); } }
+                            HorizontalLayout {
+                                padding-left: Theme.pad;
+                                padding-right: Theme.pad;
+                                spacing: 6px;
+                                cross-axis-alignment: center;
+                                Text { text: "stash@\{s.index}"; color: Theme.text-secondary; font-family: "Consolas"; font-size: Theme.fs-caption; vertical-alignment: center; }
+                                Label { text: s.message; size: Theme.fs-small; horizontal-stretch: 1; }
+                                AppIconButton { icon: "\u{E74D}"; box: 22px; icon-size: 10px; clicked => { GitUI.stash-drop(index); } }
                             }
                         }
                     }
@@ -367,41 +600,81 @@ export component GitToolView inherits Rectangle {
         }
     }
 
-    // ===== 输出控制台 / 密钥管理 / 克隆 对话框（简化合并为 console overlay） =====
-    if GitUI.console-visible: Rectangle {
-        background: rgba(0, 0, 0, 0.35);
-        Rectangle {
-            width: 640px;
-            height: 420px;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            border-radius: 12px;
-            background: Theme.content-bg;
-            border-width: 1px;
-            border-color: Theme.divider;
+    // ===== 密钥管理浮层 =====
+    if GitUI.keys-visible: Rectangle {
+        background: rgba(0, 0, 0, 0.25);
+
+        Panel {
+            width: min(root.width - 48px, 660px);
+            height: min(root.height - 48px, 440px);
+            x: (root.width - self.width) / 2;
+            y: (root.height - self.height) / 2;
+
             VerticalLayout {
-                padding: 14px;
-                spacing: 8px;
+                padding: 16px;
+                spacing: 10px;
+
                 HorizontalLayout {
                     spacing: 8px;
-                    GButton { label: "登记路径仓库"; clicked => { GitUI.open-repo-path(); } }
-                    GButton { label: "浏览…"; clicked => { GitUI.browse-repo-path(); } }
-                    GButton { label: "生成密钥"; clicked => { GitUI.key-generate(); } }
-                    GButton { label: "导入私钥"; clicked => { GitUI.key-import(); } }
-                    Rectangle { horizontal-stretch: 1; }
-                    GButton { label: "关闭"; clicked => { GitUI.close-repo(); } }
+                    cross-axis-alignment: center;
+                    Text {
+                        text: "SSH 密钥";
+                        font-size: Theme.fs-title;
+                        font-weight: 600;
+                        color: Theme.text;
+                        horizontal-stretch: 1;
+                    }
+                    AppIconButton { icon: "\u{E711}"; box: 24px; icon-size: 10px; clicked => { GitUI.keys-close(); } }
                 }
-                ListView {
+
+                Label {
+                    text: "公钥复制到 GitHub / GitLab；私钥保存在应用数据目录。把数据目录放到同步盘即可跨设备复用同一对密钥。";
+                    role: 2;
+                    size: Theme.fs-caption;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    cross-axis-alignment: center;
+                    AppButton { label: "生成密钥"; icon: "\u{E710}"; kind: 1; btn-height: 26px; clicked => { GitUI.key-generate(); } }
+                    AppButton { label: "导入私钥"; btn-height: 26px; clicked => { GitUI.key-import(); } }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+
+                HLine {}
+
+                if GitUI.keys.length == 0: EmptyState {
+                    vertical-stretch: 1;
+                    icon: "\u{E8D7}";
+                    title: "还没有密钥";
+                    hint: "点击「生成密钥」创建一对 Ed25519 密钥。";
+                }
+
+                if GitUI.keys.length > 0: ListView {
+                    vertical-stretch: 1;
                     for k[index] in GitUI.keys: Rectangle {
-                        height: 30px;
+                        height: 36px;
+                        background: key-ta.has-hover ? Theme.hover : transparent;
+                        key-ta := TouchArea {}
                         HorizontalLayout {
+                            padding-left: 6px;
+                            padding-right: 6px;
                             spacing: 8px;
-                            Text { text: k.name; color: Theme.text; font-size: 12px; width: 130px; vertical-alignment: center; overflow: elide; }
-                            Text { text: k.algorithm; color: Theme.text-secondary; font-size: 11px; width: 60px; vertical-alignment: center; }
-                            Text { text: k.fingerprint; color: Theme.text-secondary; font-family: "Consolas"; font-size: 10px; overflow: elide; vertical-alignment: center; horizontal-stretch: 1; }
-                            GButton { label: "复制公钥"; clicked => { GitUI.key-copy-public(index); } }
-                            GButton { label: "绑定"; on: k.bound; clicked => { GitUI.bind-key(index); } }
-                            GButton { label: "删除"; danger: true; clicked => { GitUI.key-delete(index); } }
+                            cross-axis-alignment: center;
+                            Text { text: k.name; color: Theme.text; font-size: Theme.fs-small; width: 140px; vertical-alignment: center; overflow: elide; }
+                            Text { text: k.algorithm; color: Theme.text-tertiary; font-size: Theme.fs-caption; width: 70px; vertical-alignment: center; }
+                            Text { text: k.fingerprint; color: Theme.text-tertiary; font-family: "Consolas"; font-size: Theme.fs-caption; overflow: elide; vertical-alignment: center; horizontal-stretch: 1; }
+                            AppButton { label: "复制公钥"; btn-height: 24px; clicked => { GitUI.key-copy-public(index); } }
+                            AppButton {
+                                label: k.bound ? "已绑定" : "绑定";
+                                kind: k.bound ? 3 : 0;
+                                btn-height: 24px;
+                                clicked => {
+                                    if (k.bound) { GitUI.unbind-key(); } else { GitUI.bind-key(index); }
+                                }
+                            }
+                            AppIconButton { icon: "\u{E74D}"; box: 22px; icon-size: 10px; clicked => { GitUI.key-delete(index); } }
                         }
                     }
                 }
@@ -409,18 +682,155 @@ export component GitToolView inherits Rectangle {
         }
     }
 
-    // toast
+    // ===== 克隆对话框 =====
+    if GitUI.clone-visible: Rectangle {
+        background: rgba(0, 0, 0, 0.25);
+
+        Panel {
+            width: min(root.width - 48px, 520px);
+            height: min(root.height - 48px, 320px);
+            x: (root.width - self.width) / 2;
+            y: (root.height - self.height) / 2;
+
+            VerticalLayout {
+                padding: 18px;
+                spacing: 10px;
+
+                Text {
+                    text: "克隆仓库";
+                    font-size: Theme.fs-title;
+                    font-weight: 600;
+                    color: Theme.text;
+                }
+
+                Rectangle {
+                    height: 30px;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        cross-axis-alignment: center;
+                        Text { text: "仓库 URL"; width: 88px; color: Theme.text-secondary; font-size: Theme.fs-small; vertical-alignment: center; }
+                        LineEdit { horizontal-stretch: 1; height: 28px; text <=> GitUI.clone-url; placeholder-text: "git@github.com:owner/repo.git"; font-family: "Consolas"; font-size: Theme.fs-small; }
+                    }
+                }
+
+                Rectangle {
+                    height: 30px;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        cross-axis-alignment: center;
+                        Text { text: "目标目录"; width: 88px; color: Theme.text-secondary; font-size: Theme.fs-small; vertical-alignment: center; }
+                        LineEdit { horizontal-stretch: 1; height: 28px; text <=> GitUI.clone-parent; font-size: Theme.fs-small; }
+                        AppButton { label: "选择…"; btn-height: 26px; clicked => { GitUI.clone-browse(); } }
+                    }
+                }
+
+                Rectangle {
+                    height: 30px;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        cross-axis-alignment: center;
+                        Text { text: "别名"; width: 88px; color: Theme.text-secondary; font-size: Theme.fs-small; vertical-alignment: center; }
+                        LineEdit { horizontal-stretch: 1; height: 28px; text <=> GitUI.clone-alias; placeholder-text: "留空取仓库名"; font-size: Theme.fs-small; }
+                    }
+                }
+
+                if GitUI.console-text != "": Rectangle {
+                    vertical-stretch: 1;
+                    min-height: 80px;
+                    border-radius: Theme.radius;
+                    background: Theme.surface;
+                    border-width: 1px;
+                    border-color: Theme.border;
+                    Text {
+                        x: 8px;
+                        y: 6px;
+                        width: parent.width - 16px;
+                        height: parent.height - 12px;
+                        text: GitUI.console-text;
+                        color: Theme.text-secondary;
+                        font-family: "Consolas";
+                        font-size: Theme.fs-caption;
+                        wrap: word-wrap;
+                    }
+                }
+
+                Rectangle { vertical-stretch: 1; }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    cross-axis-alignment: center;
+                    Rectangle { horizontal-stretch: 1; }
+                    AppButton { label: "取消"; clicked => { GitUI.clone-cancel(); } }
+                    AppButton { label: "克隆"; kind: 1; enabled: !GitUI.busy; clicked => { GitUI.clone-confirm(); } }
+                }
+            }
+        }
+    }
+
+    // ===== 输出控制台 =====
+    if GitUI.console-visible: Rectangle {
+        background: rgba(0, 0, 0, 0.25);
+
+        Panel {
+            width: min(root.width - 48px, 620px);
+            height: min(root.height - 48px, 400px);
+            x: (root.width - self.width) / 2;
+            y: (root.height - self.height) / 2;
+
+            VerticalLayout {
+                padding: 16px;
+                spacing: 10px;
+
+                Text {
+                    text: "Git 输出";
+                    font-size: Theme.fs-title;
+                    font-weight: 600;
+                    color: Theme.text;
+                }
+
+                Rectangle {
+                    vertical-stretch: 1;
+                    border-radius: Theme.radius;
+                    background: Theme.surface;
+                    border-width: 1px;
+                    border-color: Theme.border;
+
+                    Text {
+                        x: 10px;
+                        y: 8px;
+                        width: parent.width - 20px;
+                        height: parent.height - 16px;
+                        text: GitUI.console-text;
+                        color: Theme.text;
+                        font-family: "Consolas";
+                        font-size: Theme.fs-small;
+                        wrap: word-wrap;
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    cross-axis-alignment: center;
+                    Rectangle { horizontal-stretch: 1; }
+                    AppButton { label: "关闭"; clicked => { GitUI.console-close(); } }
+                }
+            }
+        }
+    }
+
+    // ===== toast =====
     if GitUI.toast != "": Rectangle {
-        x: parent.width / 2 - 160px;
-        y: 16px;
+        x: max(0px, (parent.width - 320px) / 2);
+        y: 14px;
         width: 320px;
-        height: 34px;
-        border-radius: 8px;
-        background: GitUI.toast-kind == 0 ? rgba(48, 209, 88, 0.9) : rgba(255, 159, 10, 0.92);
+        height: 32px;
+        border-radius: Theme.radius;
+        background: GitUI.toast-kind == 0 ? Theme.ok : Theme.warn;
+
         Text {
             text: GitUI.toast;
             color: #ffffff;
-            font-size: 12px;
+            font-size: Theme.fs-caption;
             horizontal-alignment: center;
             vertical-alignment: center;
             overflow: elide;

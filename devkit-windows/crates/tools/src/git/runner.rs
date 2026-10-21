@@ -3,7 +3,6 @@
 use super::types::{BranchRow, ChangeEntry, CommitRow, DiffLine, DiffLineKind, RepoStatus, StashRow};
 use anyhow::{anyhow, Result};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Duration;
 
 /// git 执行器（绑定一个仓库路径）。
@@ -20,7 +19,7 @@ impl GitRunner {
 
     /// 同步执行 git 子命令，返回 stdout。
     pub fn run(&self, args: &[&str], ssh: bool) -> Result<String> {
-        let mut cmd = Command::new(crate::toolchain::git());
+        let mut cmd = crate::proc::cmd(crate::toolchain::git());
         cmd.current_dir(&self.path).args(args);
         cmd.env("GIT_OPTIONAL_LOCKS", "0");
         cmd.env("core.quotepath", "false");
@@ -474,7 +473,7 @@ pub fn ssh_keygen(
     let file = keys_dir.join(key_id.to_string());
     // 已存在则先删
     let _ = std::fs::remove_file(&file);
-    let mut cmd = Command::new(crate::toolchain::ssh_keygen());
+    let mut cmd = crate::proc::cmd(crate::toolchain::ssh_keygen());
     cmd.arg("-t");
     cmd.arg(if algorithm.eq_ignore_ascii_case("rsa") { "rsa" } else { "ed25519" });
     if algorithm.eq_ignore_ascii_case("rsa") {
@@ -490,7 +489,7 @@ pub fn ssh_keygen(
     }
     let public_key = std::fs::read_to_string(keys_dir.join(format!("{}.pub", key_id)))?;
     let _ = std::fs::remove_file(keys_dir.join(format!("{}.pub", key_id)));
-    let fp = Command::new(crate::toolchain::ssh_keygen())
+    let fp = crate::proc::cmd(crate::toolchain::ssh_keygen())
         .arg("-lf")
         .arg(&file)
         .output()
@@ -507,7 +506,7 @@ pub fn git_available() -> bool {
 
 /// 克隆仓库（实时输出经回调推送）。
 pub fn clone(url: &str, parent_dir: &Path, key: Option<&Path>, on_line: impl Fn(&str)) -> Result<PathBuf> {
-    let mut cmd = Command::new(crate::toolchain::git());
+    let mut cmd = crate::proc::cmd(crate::toolchain::git());
     cmd.arg("clone").arg(url).current_dir(parent_dir);
     if let Some(k) = key {
         let k_str = k.to_string_lossy().to_string();

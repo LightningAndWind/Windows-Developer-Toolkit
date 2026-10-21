@@ -144,7 +144,7 @@ fn expand_archive(zip: &Path, dest: &Path) -> Result<()> {
         zip.display(),
         dest.display()
     );
-    let out = std::process::Command::new("powershell")
+    let out = crate::proc::cmd("powershell")
         .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script])
         .output()?;
     if !out.status.success() {

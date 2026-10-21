@@ -3,6 +3,7 @@
 pub mod git;
 pub mod http;
 pub mod json;
+pub mod proc;
 pub mod sftp;
 pub mod ssh;
 pub mod terminal;
